@@ -73,13 +73,14 @@ class processdump(Prepare):
         因此主链接会执行全局读锁，但非常短暂，在所有链接初始化完成将释放
         :return:
         '''
-        binlog_file,binlog_pos = self.master_info(cur=self.cur)
-        if binlog_file and binlog_pos:
+        binlog_file,binlog_pos,excute_gtid = self.master_info(cur=self.cur)
+        if (binlog_file and binlog_pos) or (excute_gtid):
             pass
         else:
             self.cur.execute('UNLOCK TABLES')
             self.close(self.cur,self.conn)
-            Logging(msg='invalid master info , file {} position {}'.format(binlog_file,binlog_pos),level='error')
+            Logging(msg='invalid master info , file {} position {} gtid {}'.format(binlog_file,binlog_pos,
+                                                                                   excute_gtid),level='error')
             sys.exit()
 
         '''初始化源库、目标库所有链接'''
@@ -123,7 +124,7 @@ class processdump(Prepare):
                 self.close(thread['cur'],thread['conn'])
             for thread in self.des_thread_list:
                 self.close(thread['cur'], thread['conn'])
-        return binlog_file,binlog_pos
+        return binlog_file,binlog_pos,excute_gtid
 
     def __dump_go(self,database,tablename,idx_name=None,pri_idx=None,max_min=None,bytes_col_list=None):
         '''

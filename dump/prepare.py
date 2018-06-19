@@ -75,7 +75,7 @@ class Prepare(object):
         '''
         cur.execute('SHOW MASTER STATUS')
         result = cur.fetchall()
-        return result[0]['File'],result[0]['Position']
+        return result[0]['File'],result[0]['Position'],result[0]['Executed_Gtid_Set']
 
     def __init_transaction(self,cur,primary_t=None):
         '''
@@ -253,9 +253,9 @@ class Prepare(object):
         :param db:
         :return:
         '''
-        sql = 'select table_name from information_schema.tables where table_schema = %s;'
+        sql = 'select TABLE_NAME from information_schema.tables where table_schema = %s;'
         cur.execute(sql,db)
         result = cur.fetchall()
-        _tmp = [row['table_name'] for row in result]
+        _tmp = [row['TABLE_NAME'] for row in result]
         return _tmp
 

@@ -192,10 +192,10 @@ class ParseEvent(ReadPacket.Read):
         nibbles = binascii.hexlify(uuid).decode('ascii')
         gtid = '%s-%s-%s-%s-%s' % (nibbles[:8], nibbles[8:12], nibbles[12:16], nibbles[16:20], nibbles[20:])
         gno_id = self.read_uint64()
-        gtid += ":{}".format(gno_id)
+        #gtid += ":{}".format(gno_id)
         if self.packet is None:
             self.file_data.seek(event_length - 1 - 16 - 8 - Metadata.binlog_event_header_len, 1)
-        return gtid
+        return gtid,gno_id
 
     def read_xid_variable(self):
         xid_num = self.read_uint64()

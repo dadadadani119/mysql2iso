@@ -12,6 +12,9 @@ class Entrance(Metadata.TableMetadata):
     def __init__(self,kargs):
         self.binlog_file = kargs['file'] if 'file' in kargs else None
         self.start_position = kargs['start-position'] if 'start-position' in kargs else None
+        self.gtid = kargs['gtid'] if 'gtid' in kargs else None
+        self.auto_position = kargs['auto_position'] if 'auto_position' in kargs else None
+
         self.host = kargs['host'] if 'host' in kargs else '127.0.0.1'
         self.port = kargs['port']  if 'port' in kargs else 3306
         self.user = kargs['user']
@@ -37,7 +40,7 @@ class Entrance(Metadata.TableMetadata):
                     host=self.host,port=self.port,user=self.user,passwd=self.passwd,dhost=self.d_host,dport=self.d_port,
                     duser=self.d_user,dpasswd=self.d_passwd,socket=self.socket,ignore_type=self.ignore_type,
                     server_id=self.server_id,binlog=self.binlog,full_dump=self.full_dump,threads=self.threads,
-                    ithread=self.ithread).Operation()
+                    ithread=self.ithread,gtid=self.gtid,auto_position=self.auto_position).Operation()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass

@@ -32,7 +32,7 @@ class GetStruct:
     def CreateTmp(self):
         self.cur.execute('CREATE DATABASE IF NOT EXISTS dump2db;')                                                                      #创建临时库
         self.cur.execute('DROP TABLE IF EXISTS dump2db.dump_status;')                                                                           #删除表
-        self.cur.execute('CREATE TABLE dump2db.dump_status(id INT,exe_gtid VARCHAR(50),logname VARCHAR(100),at_pos BIGINT,next_pos BIGINT,PRIMARY KEY(id));')    #创建临时表
+        self.cur.execute('CREATE TABLE dump2db.dump_status(id INT,exe_gtid json,logname VARCHAR(100),at_pos BIGINT,next_pos BIGINT,PRIMARY KEY(id));')    #创建临时表
 
     def SaveStatus(self,logname,at_pos,next_pos,server_id,gtid=None):
         if gtid:
