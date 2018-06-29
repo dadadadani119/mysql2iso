@@ -77,7 +77,7 @@ class Dump:
                     for row in self.result:
                         all_value += row.values()
                 else:
-                    Logging(msg='return value is empty',level='warning')
+                    #Logging(msg='return value is empty',level='warning')
                     break
 
                 sql = 'INSERT INTO {}.{} VALUES{}'.format(database,tablename,self.__combination_value_format(_len=_len,_num=_num))

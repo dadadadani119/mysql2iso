@@ -5,7 +5,7 @@
 
 import sys,getopt
 from lib import entrance
-
+from lib import get_conf
 
 def Usage():
     __usage__ = """
@@ -32,6 +32,8 @@ def Usage():
             --ignore : ignore type [delete,insert,update],allows filtering of the operation
             --ithreads : ignore thread id
             --serverid : default 133
+            --gtid : set master gtid on auto_position is true
+            --auto_position
             
     	    """
     print(__usage__)
@@ -43,7 +45,8 @@ def main(argv):
         opts, args = getopt.getopt(argv[1:], 'hf:H:u:p:P:D:t:S:i:',
                                    ['help', 'binlogfile=', 'start-position=', 'host=', 'user=', 'passwd=',
                                     'port=', 'database=', 'tables=','dhost=','dport=','duser=','dpasswd=',
-                                    'socket=','full','binlog','threads=','ignore=','serverid=','ithread='])
+                                    'socket=','full','binlog','threads=','ignore=','serverid=','ithread=',
+                                    'gtid=','auto_position'])
     except getopt.GetoptError:
         Usage()
         sys.exit(2)
@@ -57,6 +60,10 @@ def main(argv):
             _argv['start-position'] = int(a)
         elif o in ('-u', '--user'):
             _argv['user'] = a
+        elif o == '--auto_position':
+            _argv['auto_position'] = True
+        elif o == '--gtid':
+            _argv['gtid'] = a
         elif o == '--serverid':
             _argv['serverid'] = int(a)
         elif o in ('-H', '--host'):
@@ -93,9 +100,16 @@ def main(argv):
             print('unhandled option')
             sys.exit(3)
 
+    #with entrance.Entrance(_argv):
+    #    pass
+
+def start():
+    _get = get_conf.GetConf()
+    _argv = {}
+    _argv = dict(_argv,**dict(_get.GetGlobal(),**dict(_get.GetSource(),**_get.GetDestination())))
     with entrance.Entrance(_argv):
         pass
-
-
 if __name__ == "__main__":
-    main(sys.argv)
+    #main(sys.argv)
+    start()
+

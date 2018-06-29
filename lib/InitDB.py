@@ -10,7 +10,10 @@ from .Loging import Logging
 from contextlib import closing
 
 class InitMyDB(object):
-    def __init__(self,mysql_host=None,mysql_port=None,mysql_user=None,mysql_password=None,unix_socket=None):
+    def __init__(self,mysql_host=None,mysql_port=None,mysql_user=None,mysql_password=None,unix_socket=None,
+                 auto_commit=None,ssl=None):
+        self.ssl = ssl
+        self.auto_commit = auto_commit
         self.mysql_user = mysql_user
         self.mysql_password = mysql_password
         self.mysql_port = mysql_port
@@ -24,6 +27,8 @@ class InitMyDB(object):
                                               password=self.mysql_password, port=self.mysql_port,
                                               db='',
                                               charset='utf8mb4',
+                                              autocommit=self.auto_commit,
+                                              ssl=self.ssl,
                                               unix_socket=self.socket_dir,max_allowed_packet=536870912,
                                               cursorclass=pymysql.cursors.DictCursor)
             return connection

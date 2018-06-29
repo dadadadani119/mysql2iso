@@ -10,34 +10,43 @@ from .OperationDB import OperationDB
 
 class Entrance(Metadata.TableMetadata):
     def __init__(self,kargs):
-        self.binlog_file = kargs['file'] if 'file' in kargs else None
-        self.start_position = kargs['start-position'] if 'start-position' in kargs else None
-        self.host = kargs['host'] if 'host' in kargs else '127.0.0.1'
-        self.port = kargs['port']  if 'port' in kargs else 3306
-        self.user = kargs['user']
-        self.passwd = kargs['passwd']
-        self.socket = kargs['socket'] if 'socket' in kargs else None
+        self.binlog_file = kargs['binlog_file']
+        self.start_position = kargs['start_position']
+        self.gtid = kargs['gtid']
+        self.auto_position = kargs['auto_position']
+
+        self.host = kargs['host'] if kargs['host'] else '127.0.0.1'
+        self.port = kargs['port']  if kargs['port'] else 3306
+        self.user = kargs['user_name']
+        self.passwd = kargs['user_password']
+        self.socket = kargs['socket'] if kargs['socket'] else None
 
         self.databases = kargs['databases'].split(',')
-        self.tables = kargs['tables'].split(',') if 'tables' in kargs else None
+        self.tables = kargs['tables'].split(',') if kargs['tables'] else None
 
         self.d_host = kargs['dhost']
         self.d_port = kargs['dport']
         self.d_user = kargs['duser']
-        self.d_passwd = kargs['dpasswd']
-        self.ignore_type = kargs['ignore_type'] if 'ignore_type' in kargs else None
-        self.server_id = kargs['serverid'] if 'serverid' in kargs else 133
-        self.binlog = kargs['binlog'] if 'binlog' in kargs else None
+        self.d_passwd = kargs['dpassword']
+        self.ignore_type = kargs['ignore'] if kargs['ignore'] else None
+        self.server_id = kargs['server_id'] if kargs['server_id'] else 133
+        self.binlog = kargs['binlog'] if kargs['binlog'] else None
 
-        self.ithread = kargs['ithread'] if 'ithread' in kargs else None
-        self.full_dump = kargs['full'] if 'full' in kargs else None
-        self.threads = kargs['threads'] if self.full_dump and 'threads' in kargs else None
+        self.ithread = kargs['ignore_thread'] if kargs['ignore_thread'] else None
+        self.full_dump = kargs['full'] if kargs['full'] else None
+        self.threads = kargs['threads'] if kargs['threads'] else None
+
+        self.ssl = kargs['ssl']
+        self.cert = kargs['cert']
+        self.key = kargs['key']
+        self.daemon = kargs['daemon']
     def __enter__(self):
         OperationDB(databases=self.databases,tables=self.tables,binlog_file=self.binlog_file,start_position=self.start_position,
                     host=self.host,port=self.port,user=self.user,passwd=self.passwd,dhost=self.d_host,dport=self.d_port,
                     duser=self.d_user,dpasswd=self.d_passwd,socket=self.socket,ignore_type=self.ignore_type,
                     server_id=self.server_id,binlog=self.binlog,full_dump=self.full_dump,threads=self.threads,
-                    ithread=self.ithread).Operation()
+                    ithread=self.ithread,gtid=self.gtid,auto_position=self.auto_position,ssl=self.ssl,cert=self.cert,
+                    key=self.key,daemon=self.daemon).Operation()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass

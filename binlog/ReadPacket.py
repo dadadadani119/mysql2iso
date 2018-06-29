@@ -292,14 +292,14 @@ class Read(object):
                       compressed_bytes[comp_integral]
 
         _data = bytearray(self.read_bytes(_read_bytes))
-        value = _data[0]
+        value = struct.unpack('<B',_data[:1])[0]
         if value & 0x80 != 0:
             res = ""
             mask = 0
         else:
             mask = -1
             res = "-"
-        _data[0] = struct.pack('<B', value ^ 0x80)
+        _data[:1] = struct.pack('<B', value ^ 0x80)
 
         size = compressed_bytes[comp_integral]
         offset = 0
