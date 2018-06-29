@@ -41,9 +41,15 @@ class GetStruct:
         return column_list,pk_idex,column_type_list
 
     def CreateTmp(self):
+<<<<<<< HEAD
         self.__raise('CREATE DATABASE IF NOT EXISTS dump2db;')                                                                      #创建临时库
         #self.__raise('DROP TABLE IF EXISTS dump2db.dump_status;')
         self.__raise('CREATE TABLE IF NOT EXISTS dump2db.dump_status(id INT,excute_gtid json,logname VARCHAR(100),at_pos BIGINT,next_pos BIGINT,PRIMARY KEY(id));')    #创建临时表
+=======
+        self.cur.execute('CREATE DATABASE IF NOT EXISTS dump2db;')                                                                      #创建临时库
+        self.cur.execute('DROP TABLE IF EXISTS dump2db.dump_status;')                                                                           #删除表
+        self.cur.execute('CREATE TABLE dump2db.dump_status(id INT,exe_gtid json,logname VARCHAR(100),at_pos BIGINT,next_pos BIGINT,PRIMARY KEY(id));')    #创建临时表
+>>>>>>> 4ddcef19edcd96b31c1403fa3e2e920a9ecd5117
 
     def SaveStatus(self,logname,at_pos,next_pos,server_id,gtid=None,apply_conn=None,xa=None):
         if xa:
