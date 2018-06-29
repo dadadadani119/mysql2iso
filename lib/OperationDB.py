@@ -24,12 +24,9 @@ class tmepdata:
     unsigned_list = {}
     thread_id = None
     excute_gtid = {}
-<<<<<<< HEAD
     sql_list = []                       #记录一个binlog事务的所有sql语句
 
     repl_mark = None
-=======
->>>>>>> 4ddcef19edcd96b31c1403fa3e2e920a9ecd5117
 
 class OperationDB:
     def __init__(self,**kwargs):
@@ -170,17 +167,7 @@ class OperationDB:
                         cur_sql = 'DELETE FROM {}.{} WHERE {};'.format(tmepdata.database_name,tmepdata.table_name,self.WhereJoin(table_struce_key))
                         _args = value
                 state = self.__put_new_db(cur_sql,args=_args)
-<<<<<<< HEAD
             '''
-=======
-
-        if state:
-            pass
-        else:
-            self.destination_conn.rollback()
-            Logging(msg='failed!!!!', level='error')
-            sys.exit()
->>>>>>> 4ddcef19edcd96b31c1403fa3e2e920a9ecd5117
 
     def __execute_code(self,_parse_event,event_code,event_length,table_struce_key):
         if tmepdata.database_name and tmepdata.table_name and tmepdata.database_name in self.databases:
@@ -210,11 +197,7 @@ class OperationDB:
             des_mysql_info = {'mysql_host':self.dhost,'mysql_port':self.dport,'mysql_user':self.duser,
                               'mysql_password':self.dpasswd}
             src_mysql_info = {'mysql_host':self.host,'mysql_port':self.port,'mysql_user':self.user,
-<<<<<<< HEAD
                               'mysql_password':self.passwd,'unix_socket':self.unix_socket,'ssl':self.ssl_auth}
-=======
-                              'mysql_password':self.passwd,'unix_socket':self.unix_socket}
->>>>>>> 4ddcef19edcd96b31c1403fa3e2e920a9ecd5117
             _binlog_file,_binlog_pos,_excute_gtid = processdump(threads=self.threads,dbs=self.databases,tables=self.tables,
                                                    src_kwargs=src_mysql_info,des_kwargs=des_mysql_info,binlog=self.binlog).start()
             if _binlog_file is None or _binlog_pos is None:
@@ -231,7 +214,6 @@ class OperationDB:
         Logging(msg='replication to master.............', level='info')
 
 
-<<<<<<< HEAD
         if self.daemon or self.full_dump:
             rep_info = {'log_file': _binlog_file, 'log_pos': _binlog_pos, 'mysql_connection': self.conn,
                         'server_id': self.server_id, 'auto_position': self.auto_position, 'gtid': _excute_gtid}
@@ -240,22 +222,14 @@ class OperationDB:
             '''初始化要记录得gtid'''
             _gtid = self.__gtid_set(_excute_gtid) if _excute_gtid else None
 
-=======
-        if self.full_dump:
-            rep_info = {'log_file': _binlog_file, 'log_pos': _binlog_pos, 'mysql_connection': self.conn,
-                        'server_id': self.server_id, 'auto_position': self.auto_position, 'gtid': _excute_gtid}
->>>>>>> 4ddcef19edcd96b31c1403fa3e2e920a9ecd5117
             ReplConn = ReplicationMysql(**rep_info).ReadPack()
         else:
             rep_info = {'log_file': self.binlog_file, 'log_pos': self.start_position, 'mysql_connection': self.conn,
                         'server_id': self.server_id, 'auto_position': self.auto_position, 'gtid': self.gtid}
-<<<<<<< HEAD
             Logging(msg='binlog: {} position: {} gtid : {}'.format(self.binlog_file, self.start_position, self.gtid),
                     level='info')
             '''初始化要记录得gtid'''
             _gtid = self.__gtid_set(self.gtid) if self.gtid else None
-=======
->>>>>>> 4ddcef19edcd96b31c1403fa3e2e920a9ecd5117
             ReplConn = ReplicationMysql(**rep_info).ReadPack()
         '''============================================================================================================'''
 
@@ -263,18 +237,10 @@ class OperationDB:
         next_pos = None
         binlog_file_name = _binlog_file if self.full_dump else self.binlog_file
 
-<<<<<<< HEAD
         _mysql_conn = GetStruct(host=self.dhost, port=self.dport,user=self.duser,passwd=self.dpasswd)
         _mysql_conn.CreateTmp()
 
 
-=======
-        _mysql_conn = GetStruct(host=self.host, port=self.port,user=self.user,passwd=self.passwd,socket=self.unix_socket)
-        _mysql_conn.CreateTmp()
-
-        '''初始化要记录得gtid'''
-        _gtid = self.__gtid_set(_excute_gtid) if _excute_gtid else None
->>>>>>> 4ddcef19edcd96b31c1403fa3e2e920a9ecd5117
 
         at_pos = _binlog_pos if self.full_dump else self.start_position
         if ReplConn:
@@ -370,7 +336,6 @@ class OperationDB:
 
 
                     elif event_code == binlog_events.GTID_LOG_EVENT:
-<<<<<<< HEAD
                         '''
                         获取当前事务GTID，在此不做任何操作，因为不知道gtid包含的事务所属库、表
                         '''
@@ -411,19 +376,6 @@ class OperationDB:
                         tmepdata.sql_list = []
                         self.xa = None
                         self.repl_mark = None
-=======
-                        __gtid,__gno_id = _parse_event.read_gtid_event(event_length=event_length)
-                        _gtid[__gtid] = '1-{}'.format(__gno_id)
-                    elif event_code == binlog_events.XID_EVENT:
-                        if self.auto_position:
-                            _mysql_conn.SaveStatus(logname=binlog_file_name, at_pos=at_pos, next_pos=next_pos,
-                                                   server_id=self.server_id, gtid=json.dumps(_gtid))
-                            tmepdata.excute_gtid = _gtid.copy()
-                        else:
-                            _mysql_conn.SaveStatus(logname=binlog_file_name, at_pos=at_pos, next_pos=next_pos,
-                                                       server_id=self.server_id)
-                        self.destination_conn.commit()
->>>>>>> 4ddcef19edcd96b31c1403fa3e2e920a9ecd5117
                         continue
                 except pymysql.OperationalError:
                     '''链接断开重新注册'''
@@ -440,7 +392,6 @@ class OperationDB:
             self.destination_conn.close()
             self.conn.close()
 
-<<<<<<< HEAD
     def __set_mark(self):
         '''
         所有目标库操作前都设置事务标签，用于双向同步的回环控制
@@ -457,9 +408,6 @@ class OperationDB:
         :param args:
         :return:
         '''
-=======
-    def __put_new_db(self,sql,args):
->>>>>>> 4ddcef19edcd96b31c1403fa3e2e920a9ecd5117
         try:
             self.destination_cur.execute(sql,args)
         except pymysql.OperationalError:
@@ -492,7 +440,6 @@ class OperationDB:
 
 
     def __retry_regist_master(self,gtid=None,binlog=None,position=None):
-<<<<<<< HEAD
         '''
         尝试重新注册主从链接
         :param gtid:
@@ -500,19 +447,13 @@ class OperationDB:
         :param position:
         :return:
         '''
-=======
->>>>>>> 4ddcef19edcd96b31c1403fa3e2e920a9ecd5117
         import time
         if gtid:
             gtid = ','.join(['{}:{}'.format(uuid,gtid[uuid]) for uuid in gtid])
         while True:
             try:
                 self.conn = InitMyDB(mysql_host=self.host, mysql_port=self.port, mysql_user=self.user,
-<<<<<<< HEAD
                                      mysql_password=self.passwd, unix_socket=self.unix_socket,ssl=self.ssl_auth).Init()
-=======
-                                     mysql_password=self.passwd, unix_socket=self.unix_socket).Init()
->>>>>>> 4ddcef19edcd96b31c1403fa3e2e920a9ecd5117
                 rep_info = {'log_file': binlog, 'log_pos': position, 'mysql_connection': self.conn,
                             'server_id': self.server_id, 'auto_position': self.auto_position, 'gtid': gtid}
                 ReplConn = ReplicationMysql(**rep_info).ReadPack()
@@ -521,7 +462,6 @@ class OperationDB:
             except pymysql.Error:
                 Logging(msg=traceback.format_list(),level='error')
 
-<<<<<<< HEAD
             time.sleep(1)
 
     def __retry_connection_destion(self):
@@ -591,6 +531,3 @@ class OperationDB:
             gtid = eval(result[0]['excute_gtid'])
             _gtid = ['{}:{}'.format(uuid,gtid[uuid]) for uuid in gtid]
         return result[0]['logname'],result[0]['next_pos'],','.join(_gtid)
-=======
-            time.sleep(1)
->>>>>>> 4ddcef19edcd96b31c1403fa3e2e920a9ecd5117

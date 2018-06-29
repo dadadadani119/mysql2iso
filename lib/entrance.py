@@ -10,7 +10,6 @@ from .OperationDB import OperationDB
 
 class Entrance(Metadata.TableMetadata):
     def __init__(self,kargs):
-<<<<<<< HEAD
         self.binlog_file = kargs['binlog_file']
         self.start_position = kargs['start_position']
         self.gtid = kargs['gtid']
@@ -21,18 +20,6 @@ class Entrance(Metadata.TableMetadata):
         self.user = kargs['user_name']
         self.passwd = kargs['user_password']
         self.socket = kargs['socket'] if kargs['socket'] else None
-=======
-        self.binlog_file = kargs['file'] if 'file' in kargs else None
-        self.start_position = kargs['start-position'] if 'start-position' in kargs else None
-        self.gtid = kargs['gtid'] if 'gtid' in kargs else None
-        self.auto_position = kargs['auto_position'] if 'auto_position' in kargs else None
-
-        self.host = kargs['host'] if 'host' in kargs else '127.0.0.1'
-        self.port = kargs['port']  if 'port' in kargs else 3306
-        self.user = kargs['user']
-        self.passwd = kargs['passwd']
-        self.socket = kargs['socket'] if 'socket' in kargs else None
->>>>>>> 4ddcef19edcd96b31c1403fa3e2e920a9ecd5117
 
         self.databases = kargs['databases'].split(',')
         self.tables = kargs['tables'].split(',') if kargs['tables'] else None
@@ -58,12 +45,8 @@ class Entrance(Metadata.TableMetadata):
                     host=self.host,port=self.port,user=self.user,passwd=self.passwd,dhost=self.d_host,dport=self.d_port,
                     duser=self.d_user,dpasswd=self.d_passwd,socket=self.socket,ignore_type=self.ignore_type,
                     server_id=self.server_id,binlog=self.binlog,full_dump=self.full_dump,threads=self.threads,
-<<<<<<< HEAD
                     ithread=self.ithread,gtid=self.gtid,auto_position=self.auto_position,ssl=self.ssl,cert=self.cert,
                     key=self.key,daemon=self.daemon).Operation()
-=======
-                    ithread=self.ithread,gtid=self.gtid,auto_position=self.auto_position).Operation()
->>>>>>> 4ddcef19edcd96b31c1403fa3e2e920a9ecd5117
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
