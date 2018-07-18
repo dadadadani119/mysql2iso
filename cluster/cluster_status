@@ -1,0 +1,3 @@
+{'host':'192.168.212.199','task_list':{'name1':'FOLLOWING','name2':'LEADING'},'status':'online','isself':1}
+{'host':'192.168.212.205','task_list':{'name1':'LEADING','name2':'FOLLOWING'},'status':'online','isself':0}
+{'host':'192.168.212.204','task_list':{'name1':'FOLLOWING','name2':'FOLLOWING'},'status':'online','isself':0}

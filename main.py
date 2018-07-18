@@ -2,114 +2,51 @@
 '''
 @author: Great God
 '''
-
-import sys,getopt
+import os
 from lib import entrance
 from lib import get_conf
+from cluster import InitCluster
+from lib.Loging import Logging
 
-def Usage():
-    __usage__ = """
-    	Usage:
-    	Options:
-      		-h [--help] : print help message
-      		-f [--binlogfile] : the file path
-      		--start-position : Start reading the binlog at position N. Applies to the
-                                    first binlog passed on the command line.
-            -t [--tables] : table name list ,"t1,t2,t3"
-            -D [--databases] : database name list ,"db1,db2,db3"
-            -u [--user] : User for login if not current user
-            -p [--passwd] : Password to use when connecting to server
-            -H [--host] : Connect to host, default localhost
-            -P [--port] : Port number to use for connection ,default 3306
-            -S [--socket] : mysql unix socket
-            --dhost : destination mysql host
-            --dport : destination mysql port
-            --duser : destination mysql user name
-            --dpasswd : destination mysql password
-            --binlog : record binlog on destination mysql , when append data. default flase
-            --full : whether the total quantity is exported. default false
-            --threads : dump threads,default 1 if --full is true
-            --ignore : ignore type [delete,insert,update],allows filtering of the operation
-            --ithreads : ignore thread id
-            --serverid : default 133
-            --gtid : set master gtid on auto_position is true
-            --auto_position
-            
-    	    """
-    print(__usage__)
+def init():
+    _get = get_conf.GetIso()
+    _argv = _get.get()
+    if _argv['cluster']:
+        path = os.path.abspath(os.path.join(os.path.dirname(__file__)))
+        file_list = []
+        for root, dirs, files in os.walk('{}/conf/include'.format(path)):
+            for file in files:
+                if file.split('.')[-1] == 'conf':
+                    file_list.append(file)
 
-
-def main(argv):
-    _argv = {}
-    try:
-        opts, args = getopt.getopt(argv[1:], 'hf:H:u:p:P:D:t:S:i:',
-                                   ['help', 'binlogfile=', 'start-position=', 'host=', 'user=', 'passwd=',
-                                    'port=', 'database=', 'tables=','dhost=','dport=','duser=','dpasswd=',
-                                    'socket=','full','binlog','threads=','ignore=','serverid=','ithread=',
-                                    'gtid=','auto_position'])
-    except getopt.GetoptError:
-        Usage()
-        sys.exit(2)
-    for o, a in opts:
-        if o in ('-h', '--help'):
-            Usage()
-            sys.exit(1)
-        elif o in ('-f', '--binlogfile'):
-            _argv['file'] = a
-        elif o in ('--start-position',):
-            _argv['start-position'] = int(a)
-        elif o in ('-u', '--user'):
-            _argv['user'] = a
-        elif o == '--auto_position':
-            _argv['auto_position'] = True
-        elif o == '--gtid':
-            _argv['gtid'] = a
-        elif o == '--serverid':
-            _argv['serverid'] = int(a)
-        elif o in ('-H', '--host'):
-            _argv['host'] = a
-        elif o in ('-i','--ignore'):
-            _argv['ignore_type'] = a
-        elif o in ('-p', '--passwd'):
-            _argv['passwd'] = a
-        elif o in ('-P', '--port'):
-            _argv['port'] = int(a)
-        elif o in ('-t','--tables'):
-            _argv['tables'] = a
-        elif o in ('-D','--database'):
-            _argv['databases'] = a
-        elif o in ('--dhost'):
-            _argv['dhost'] = a
-        elif o in ('--dport'):
-            _argv['dport'] = int(a)
-        elif o in ('--duser'):
-            _argv['duser'] = a
-        elif o in ('--dpasswd'):
-            _argv['dpasswd'] = a
-        elif o in ('-S','--socket'):
-            _argv['socket'] = a
-        elif o in ('--full'):
-            _argv['full'] = True
-        elif o in ('--threads'):
-            _argv['threads'] = int(a)
-        elif o in ('--binlog'):
-            _argv['binlog'] = True
-        elif o in ('--ithread'):
-            _argv['ithread'] = int(a)
+        task_list = {}
+        for file in file_list:
+            task_list[file.split('.')[0]] = start(file)
+        if _argv['cluster_type'] == 'zk_mode':
+            with InitCluster.ClusterEnt(**dict(task_list,**{'zk_hosts':_argv['zk_hosts'],
+                                                            'cluster_type':_argv['cluster_type']})):
+                pass
+        elif _argv['cluster_type'] == 'leader_mode':
+            with InitCluster.ClusterEnt(**dict(task_list,**{'cluster_nodes':_argv['cluster_nodes'],
+                                                            'cluster_type': _argv['cluster_type'],
+                                                            'self_host':_argv['host']})):
+                pass
         else:
-            print('unhandled option')
-            sys.exit(3)
+            Logging(msg='invalid option cluster_type {}'.format(_argv['cluster_type']), level='warning')
+    else:
+        _argv = start(_argv['config'])
+        with entrance.Entrance(_argv):
+            pass
 
-    #with entrance.Entrance(_argv):
-    #    pass
 
-def start():
-    _get = get_conf.GetConf()
+def start(conf_name):
+    _get = get_conf.GetConf(conf_name)
     _argv = {}
-    _argv = dict(_argv,**dict(_get.GetGlobal(),**dict(_get.GetSource(),**_get.GetDestination())))
-    with entrance.Entrance(_argv):
-        pass
+    _argv = dict(_argv,**dict(_get.GetGlobal(),**dict(_get.GetSource(),**dict(_get.GetDestination(),**_get.GetStatus()))))
+    return _argv
+
+
 if __name__ == "__main__":
     #main(sys.argv)
-    start()
+    init()
 

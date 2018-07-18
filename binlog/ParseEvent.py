@@ -289,11 +289,17 @@ class ParseEvent(ReadPacket.Read):
 
                 elif colums_type_id_list[idex] == Metadata.column_type_dict.MYSQL_TYPE_TIMESTAMP2:
                     _time, read_bytes = self.add_fsp_to_time(datetime.datetime.fromtimestamp(self.read_int_be_by_size(4)), metadata_dict[idex])
-                    values.append(str(_time))
+                    if str(_time) == '1970-01-01 00:00:00':
+                        values.append('0000-00-00 00:00:00')
+                    else:
+                        values.append(_time)
                     bytes += read_bytes + 4
                 elif colums_type_id_list[idex] == Metadata.column_type_dict.MYSQL_TYPE_DATETIME2:
                     _time, read_bytes = self.read_datetime2(metadata_dict[idex])
-                    values.append(str(_time))
+                    if str(_time) == '1970-01-01 00:00:00':
+                        values.append('0000-00-00 00:00:00')
+                    else:
+                        values.append(_time)
                     bytes += 5 + read_bytes
                 elif colums_type_id_list[idex] == Metadata.column_type_dict.MYSQL_TYPE_YEAR:
                     _date = self.read_uint8() + 1900
@@ -301,13 +307,13 @@ class ParseEvent(ReadPacket.Read):
                     bytes += 1
                 elif colums_type_id_list[idex] == Metadata.column_type_dict.MYSQL_TYPE_DATE:
                     _time = self.read_date()
-                    values.append(str(_time))
+                    values.append(_time)
                     bytes += 3
 
                 elif colums_type_id_list[idex] == Metadata.column_type_dict.MYSQL_TYPE_TIME2:
                     _time, read_bytes = self.read_time2(metadata_dict[idex])
                     bytes += read_bytes
-                    values.append(str(_time))
+                    values.append(_time)
 
                 elif colums_type_id_list[idex] in [Metadata.column_type_dict.MYSQL_TYPE_VARCHAR,
                                                    Metadata.column_type_dict.MYSQL_TYPE_VAR_STRING,
@@ -324,7 +330,7 @@ class ParseEvent(ReadPacket.Read):
                 elif colums_type_id_list[idex] in [Metadata.column_type_dict.MYSQL_TYPE_JSON]:
                     _metadata = metadata_dict[idex]
                     value_length = self.read_uint_by_size(_metadata)
-                    values.append(str(self.read_binary_json(value_length)))
+                    values.append(self.read_binary_json(value_length))
                     bytes += value_length + _metadata
                 elif colums_type_id_list[idex] == Metadata.column_type_dict.MYSQL_TYPE_STRING:
                     _metadata = metadata_dict[idex]

@@ -12,12 +12,12 @@ path = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 
 class GetConf(object):
     '''获取配置项'''
-    def __init__(self):
-        conf_path = path.replace('\\','/') +'/conf/iso.conf'
-        self.keys_path = path.replace('\\','/')+'/conf/keys/'
+    def __init__(self,conf_name):
+        conf_path = path.replace('\\','/') +'/conf/include/{}'.format(conf_name)
         self.global_s = 'global'
         self.source = 'source'
         self.destination = 'destination'
+        self.status = 'status'
         self.conf = configparser.ConfigParser()
         self.conf.read(conf_path,encoding="utf-8-sig")
 
@@ -116,10 +116,79 @@ class GetConf(object):
                 Logging(msg='invalid option {}'.format(option), level='warning')
 
         if options_conf['dhost'] is None or options_conf['duser'] is None or options_conf['dpassword'] is None:
-            Logging(msg='{} cannot is null'.format('dhost/duser,dpassword'), level='error')
+            Logging(msg='{} cannot is null'.format('dhost/duser/dpassword'), level='error')
             sys.exit()
 
         return options_conf
+
+    def GetStatus(self):
+        '''
+        获取所有目标库配置项
+        :return:
+        '''
+        options_conf = {
+            'shost' : None,                     #目标库地址
+            'sport' : 3306,                     #目标库端口，默认3306
+            'suser' : None,                     #目标库用户名
+            'spassword' : None,                 #目标库用户密码
+            'sbinlog' : False                    #同步数据是否记录到binlog,默认不记录
+        }
+        des_options = self.conf.options(self.status)
+        for option in des_options:
+            if option in options_conf:
+                option_value  = self.conf.get(self.status,option)
+                if option == 'sport':
+                    options_conf[option] = int(option_value) if option_value else 3306
+                elif option == 'sbinlog':
+                    options_conf[option] = True if option_value == 'True' else False
+                else:
+                    options_conf[option] = option_value if option_value else None
+            else:
+                Logging(msg='invalid option {}'.format(option), level='warning')
+
+        if options_conf['shost'] is None or options_conf['suser'] is None or options_conf['spassword'] is None:
+            Logging(msg='{} cannot is null'.format('shost/suser/spassword'), level='error')
+            sys.exit()
+
+        return options_conf
+
+class GetIso:
+    def __init__(self):
+        conf_path = path.replace('\\', '/') + '/conf/iso.conf'
+        self.options = 'iso'
+        self.conf = configparser.ConfigParser()
+        self.conf.read(conf_path, encoding="utf-8-sig")
+
+    def get(self):
+        '''
+        获取根配置文件配置项
+        :return:
+        '''
+        option_conf = {
+            'include' : None,                   #引用配置文件目录
+            'config' : None,                    #单机模式下要执行的同步任务配置文件路径
+            'cluster' : False,                  #是否集群模式，默认False
+            'cluster_type' : 'zk_mode',         #集群模式类型,默认基于zk实现
+            'cluster_nodes' : None,             #集群模式下配置的节点信息
+            'zk_hosts' : None,                  #zk集群模式下需要的集群地址
+            'host' : None                       #本机IP
+        }
+
+        conf_options = self.conf.options(self.options)
+        for option in conf_options:
+            if option in option_conf:
+                option_value = self.conf.get(self.options,option)
+                if option == 'cluster':
+                    option_conf['cluster'] = True if option_value == 'True' else False
+                else:
+                    option_conf[option] = option_value
+            else:
+                Logging(msg='invalid option {}'.format(option), level='warning')
+        if not option_conf['cluster'] and not option_conf['config']:
+            Logging(msg='{} cannot is null, when cluster is False'.format('config'), level='error')
+
+        return option_conf
+
 
 #get = GetConf()
 #print(get.GetGlobal())
