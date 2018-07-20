@@ -3,7 +3,8 @@
 @author: Great God
 '''
 import sys,pymysql,traceback
-import json
+import json,queue
+from .ErrorCode import ErrorCode
 from .Loging import Logging
 from .InitDB import InitMyDB
 from .escape import escape
@@ -53,6 +54,10 @@ class OperationDB(escape):
         self.apply_conn = None
         self.crc = None
         self._status_conn = None
+        self.gno_uid = None                                                                                                                         #binlog中读取到当前事务的gtid
+        self.gno_id = None                                                                                                                          #binlog读取到gtid的gno
+
+
 
         self.databases = kwargs['databases']
         self.tables = kwargs['tables']
@@ -207,8 +212,12 @@ class OperationDB(escape):
         如有全量导出使用导出开始时记录的binlog信息，不然使用传入参数的值
         '''
         self.__init_master_slave_conn()  # 初始化源库、目标库同步链接
+        self._status_conn = GetStruct(host=self.shost, port=self.sport, user=self.suser, passwd=self.spassword,
+                                      binlog=self.sbinlog)  #状态库链接类初始化
+        self._status_conn.CreateTmp()
         if self.daemon:
-            _binlog_file, _binlog_pos, _excute_gtid = self.__get_daemon_info()
+            _binlog_file, _binlog_pos, _excute_gtid ,gtid_uid = self._status_conn.get_daemon_info(self.server_id)
+            _excute_gtid = self.__check_deamon_status(gtid_uid,_excute_gtid)
         Logging(msg='replication to master.............', level='info')
 
 
@@ -237,9 +246,6 @@ class OperationDB(escape):
         #_mysql_conn = GetStruct(host=self.dhost, port=self.dport,user=self.duser,passwd=self.dpasswd)
 
 
-
-        self._status_conn = GetStruct(host=self.shost, port=self.sport,user=self.suser,passwd=self.spassword,binlog=self.sbinlog)
-        self._status_conn.CreateTmp()
 
         next_pos = _binlog_pos if self.full_dump else self.start_position #开始读取的binlog位置
 
@@ -348,8 +354,8 @@ class OperationDB(escape):
                     '''
                     获取当前事务GTID，在此不做任何操作，因为不知道gtid包含的事务所属库、表
                     '''
-                    __gtid,__gno_id = _parse_event.read_gtid_event(event_length=event_length)
-                    _gtid[__gtid] = '1-{}'.format(__gno_id)
+                    self.gno_uid,self.gno_id = _parse_event.read_gtid_event(event_length=event_length)
+                    _gtid[self.gno_uid] = '1-{}'.format(self.gno_id)
 
                 elif event_code == binlog_events.XID_EVENT:
                     '''
@@ -386,9 +392,9 @@ class OperationDB(escape):
         所有目标库操作前都设置事务标签，用于双向同步的回环控制
         :return:
         '''
-        sql = 'INSERT INTO repl_mark.mark_status(id,`status`) VALUES(%s,uuid_short()) ON DUPLICATE KEY UPDATE  `status`=uuid_short();'
-        tmepdata.sql_list.append([sql,self.server_id])
-        self.__check_stat(self.__raise_sql(sql, args=self.server_id))
+        sql = 'INSERT INTO repl_mark.mark_status(id,gtid,gno_id) VALUES(%s,%s,%s) ON DUPLICATE KEY UPDATE  gtid=%s,gno_id=%s;'
+        tmepdata.sql_list.append([sql,[self.server_id,self.gno_uid,self.gno_id,self.gno_uid,self.gno_id]])
+        self.__check_stat(self.__raise_sql(sql, args=[self.server_id,self.gno_uid,self.gno_id,self.gno_uid,self.gno_id]))
 
     def __save_status(self,binlog_file_name,at_pos,next_pos,save_gtid_value,_apply_conn):
         '''
@@ -403,7 +409,8 @@ class OperationDB(escape):
         state = self._status_conn.SaveStatus(logname=binlog_file_name, at_pos=at_pos, next_pos=next_pos,
                                              server_id=self.server_id,
                                              gtid=save_gtid_value,
-                                             apply_conn=_apply_conn)
+                                             apply_conn=_apply_conn,
+                                             gno_uid=self.gno_uid)
         if state:
             return True
         else:
@@ -435,9 +442,14 @@ class OperationDB(escape):
                 self.destination_conn.commit()
             else:
                 self.destination_cur.execute(sql,args)
-        except pymysql.Error:
-            Logging(msg=traceback.format_exc(),level='error')
-            self.__retry_execute(sql=sql, args=args, type=type, retry=retry)
+        except pymysql.Error as e:
+            Logging(msg=traceback.format_exc(), level='error')
+            if ErrorCode[e.args[0]]:
+                self.__retry_execute(sql=sql, args=args, type=type, retry=retry)
+            else:
+                Logging(msg='sql:{},values:{}'.format(sql,args), level='error')
+                Logging(msg=e, level='error')
+                return None
         except:
             Logging(msg=traceback.format_exc(), level='error')
             return None
@@ -447,12 +459,13 @@ class OperationDB(escape):
         self.__retry_connection_destion()
         if retry is None:
             for row in tmepdata.sql_list:
-                self.destination_cur.execute(row[0], row[1])
+                self.__raise_sql(row[0],row[1])
+                #self.destination_cur.execute(row[0], row[1])
         if type:
             if sql == 'commit':
                 self.destination_conn.commit()
             else:
-                self.destination_cur.execute(sql, args)
+                self.__raise_sql(sql, args,type=type,retry=retry)
 
     def __getcolumn(self,*args):
         '''args顺序 database、tablename'''
@@ -504,11 +517,17 @@ class OperationDB(escape):
             try:
                 self.conn = InitMyDB(mysql_host=self.host, mysql_port=self.port, mysql_user=self.user,
                                      mysql_password=self.passwd, unix_socket=self.unix_socket,ssl=self.ssl_auth).Init()
-                rep_info = {'log_file': binlog, 'log_pos': position, 'mysql_connection': self.conn,
-                            'server_id': self.server_id, 'auto_position': self.auto_position, 'gtid': gtid}
-                ReplConn = ReplicationMysql(**rep_info).ReadPack()
-                Logging(msg='regist master ok !', level='info')
-                return ReplConn
+                if self.conn:
+                    rep_info = {'log_file': binlog, 'log_pos': position, 'mysql_connection': self.conn,
+                                'server_id': self.server_id, 'auto_position': self.auto_position, 'gtid': gtid}
+                    try:
+                        ReplConn = ReplicationMysql(**rep_info).ReadPack()
+                    except pymysql.Error as e:
+                        Logging(msg=traceback.format_exc(),level='error')
+                        if ErrorCode[e.args[0]]:
+                            self.__retry_regist_master(gtid=gtid,binlog=binlog,position=position)
+                    Logging(msg='regist master ok !', level='info')
+                    return ReplConn
             except pymysql.Error:
                 Logging(msg=traceback.format_list(),level='error')
 
@@ -528,6 +547,7 @@ class OperationDB(escape):
                 self.destination_conn = InitMyDB(mysql_host=self.dhost, mysql_port=self.dport, mysql_user=self.duser,
                                                  mysql_password=self.dpasswd,auto_commit=False).Init()
                 self.destination_cur = self.destination_conn.cursor()
+                Logging(msg='connection success!!!', level='info')
                 if self.binlog is None:
                     self.destination_cur.execute('set sql_log_bin=0;')  # 设置binlog参数
                 self.destination_cur.execute('SET SESSION wait_timeout = 2147483;')
@@ -547,16 +567,37 @@ class OperationDB(escape):
             Logging(msg='failed!!!!', level='error')
             sys.exit()
 
-    def __get_daemon_info(self):
+
+    def __check_deamon_status(self,excute_gno_uid,excute_gtid):
         '''
-        重启获取已经读取的binlog信息
+        检查状态保存库(dump2db.dump_status)和标签库(repl_mark.mark_status)中
+        保存已执行的GTID，如果标签库中大于状态库，将使用标签库中的GTID，因为事务提交
+        过程是先提交数据再提交状态库
+        :param excute_gno_uid:
+        :param excute_gtid:
         :return:
         '''
-        self.__check_stat(self.__raise_sql('select logname,next_pos,excute_gtid from dump2db.dump_status where  id = %s;',self.server_id,type=True))
-        result = self.destination_cur.fetchall()
-        _gtid = []
-        if result[0]['excute_gtid']:
-            gtid = eval(result[0]['excute_gtid'])
-            _gtid = ['{}:{}'.format(uuid,gtid[uuid]) for uuid in gtid]
-        return result[0]['logname'],result[0]['next_pos'],','.join(_gtid)
-
+        sql = 'SELECT gtid,gno_id FROM repl_mark.mark_status where id = %s'
+        self.__check_stat(self.__raise_sql(sql=sql,args=self.server_id))
+        try:
+            result = self.destination_cur.fetchall()
+        except pymysql.Error as e:
+            Logging(msg=traceback.format_exc(),level='error')
+            self.__check_deamon_status(excute_gno_uid,excute_gtid)
+        if result:
+            gno_uid = result[0]['gtid']
+            gno_id = result[0]['gno_id'] if gno_uid else None
+            if gno_uid == excute_gno_uid:
+                execut_gno = int((excute_gtid[gno_uid].split('-'))[1])
+                if execut_gno <= gno_id:
+                    excute_gtid[gno_uid] = '1-{}'.format(gno_id)
+                else:
+                    Logging(msg='The GTID in the state library to execute is greater than the GTID in the tag '
+                                'library, which may trigger a large fault logic or there are filtering operations, '
+                                'continu..... but please check db',level='error')
+            else:
+                Logging(msg='The GTID in the state library is not the same as the GTID in the tag library. '
+                            'It may be caused by a downtime switch. Continue to use the GTID in the state'
+                            ' library....',level='warning')
+        excute_gtid = ','.join(['{}:{}'.format(uuid, excute_gtid[uuid]) for uuid in excute_gtid])
+        return excute_gtid

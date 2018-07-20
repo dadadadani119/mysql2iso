@@ -32,7 +32,7 @@ class InitMyDB(object):
                                               unix_socket=self.socket_dir,max_allowed_packet=536870912,
                                               cursorclass=pymysql.cursors.DictCursor)
             return connection
-        except pymysql.Error:
+        except:
             Logging(msg=traceback.format_exc(),level='error')
             return None
 

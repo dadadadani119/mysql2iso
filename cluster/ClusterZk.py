@@ -35,6 +35,7 @@ class ClusterOp:
 
     def __check_state(self):
         while True:
+
             if self.task_thread_list:
                 for task_name in self.task_thread_list:
                     if self.task_thread_list[task_name].is_alive():
@@ -53,6 +54,7 @@ class ClusterOp:
                     else:
                         del self.watch_thread_list[task_name]
                         self.__create_repl(task_name=task_name)
+
             time.sleep(1)
 
     def __create_repl(self,task_name):
