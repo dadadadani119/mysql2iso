@@ -3,7 +3,7 @@
 @author: Great God
 '''
 import sys,pymysql,traceback
-import json,queue
+import json,time
 from .ErrorCode import ErrorCode
 from .Loging import Logging
 from .InitDB import InitMyDB
@@ -35,7 +35,8 @@ class OperationDB(escape):
         super(OperationDB,self).__init__()
         self.ssl_auth = {'cert':kwargs['cert'],'key':kwargs['key']} if kwargs['ssl'] else None
         self.daemon = kwargs['daemon']
-
+        self.queue = kwargs['queue']
+        print('op: {}'.format(self.queue))
         self.full_dump = kwargs['full_dump']                                                                                                        #是否全量导出
         self.threads = kwargs['threads']                                                                                                            #全量导出时并发线程
 
@@ -48,6 +49,7 @@ class OperationDB(escape):
         self.destination_conn = None
         self.destination_cur = None
         self.conn = None
+        self.cur = None
 
         self.repl_mark = None                                                                                                                       #读取binlog记录该GTID事务是否拥有标签操作
         self.repl_mark_status = None                                                                                                                #插入数据时记录该事务是否已做标签操作
@@ -57,7 +59,7 @@ class OperationDB(escape):
         self.gno_uid = None                                                                                                                         #binlog中读取到当前事务的gtid
         self.gno_id = None                                                                                                                          #binlog读取到gtid的gno
 
-
+        self.trancaction_list = []                                                                                                                  #已执行的事务sql,用于重连之后重新执行
 
         self.databases = kwargs['databases']
         self.tables = kwargs['tables']
@@ -140,7 +142,6 @@ class OperationDB(escape):
                     _args = row_value[1] + row_value[0]
 
                 tmepdata.sql_list.append([cur_sql,_args])
-                self.__check_stat(self.__raise_sql(cur_sql,args=_args))
 
         else:
             if event_code == binlog_events.WRITE_ROWS_EVENT:
@@ -150,7 +151,7 @@ class OperationDB(escape):
                 all_values = []
                 for value in _values:
                     all_values += value
-                self.__check_stat(self.__raise_sql(cur_sql,all_values))
+                tmepdata.sql_list.append([cur_sql,all_values])
             elif event_code == binlog_events.DELETE_ROWS_EVENT:
                 for value in _values:
                     if __pk_idx is not None:
@@ -163,7 +164,6 @@ class OperationDB(escape):
                         cur_sql = 'DELETE FROM {}.{} WHERE {};'.format(tmepdata.database_name,tmepdata.table_name,self.WhereJoin(table_struce_key))
                         _args = value
                     tmepdata.sql_list.append([cur_sql,_args])
-                    self.__check_stat(self.__raise_sql(cur_sql,_args))
 
     def __execute_code(self,_parse_event,event_code,event_length,table_struce_key):
         _values = _parse_event.GetValue(type_code=event_code, event_length=event_length,
@@ -171,22 +171,6 @@ class OperationDB(escape):
                                         metadata_dict=tmepdata.metadata_dict,
                                         unsigned_list=tmepdata.table_struct_type_list[table_struce_key])
         self.GetSQL(_values=_values, event_code=event_code)
-        '''
-        if tmepdata.database_name and tmepdata.table_name and tmepdata.database_name in self.databases:
-            if self.tables:
-                if tmepdata.table_name in self.tables:
-                    _values = _parse_event.GetValue(type_code=event_code, event_length=event_length,
-                                                    cloums_type_id_list=tmepdata.cloums_type_id_list,
-                                                    metadata_dict=tmepdata.metadata_dict,
-                                                    unsigned_list=tmepdata.table_struct_type_list[table_struce_key])
-                    self.GetSQL(_values=_values, event_code=event_code)
-            else:
-                _values = _parse_event.GetValue(type_code=event_code, event_length=event_length,
-                                                cloums_type_id_list=tmepdata.cloums_type_id_list,
-                                                metadata_dict=tmepdata.metadata_dict,
-                                                unsigned_list=tmepdata.table_struct_type_list[table_struce_key])
-                self.GetSQL(_values=_values, event_code=event_code)
-        '''
 
     def Operation(self):
         '''
@@ -259,6 +243,10 @@ class OperationDB(escape):
             table_map_event: 获取数据库名、表明、字段信息
             gtid_log_event、rotate_event、query_event：获取binlog基本信息记录与dump2db中
             '''
+            self.__get_all_table_struct()
+            self.destination_cur.close()
+            self.destination_conn.close()
+
             while 1:
                 at_pos = next_pos
                 try:
@@ -314,23 +302,11 @@ class OperationDB(escape):
                     elif tmepdata.database_name in self.databases:
                         if self.tables:
                             if tmepdata.table_name in self.tables:
-                                if table_struce_key not in tmepdata.table_struct_list:
-                                    column_list, pk_idex, column_type_list = self.__getcolumn(
-                                        tmepdata.database_name, tmepdata.table_name)
-                                    tmepdata.table_struct_list[table_struce_key] = column_list
-                                    tmepdata.table_pk_idex_list[table_struce_key] = pk_idex
-                                    tmepdata.table_struct_type_list[table_struce_key] = column_type_list
                                 '''写入标签'''
                                 if self.repl_mark_status is None:
                                     self.__set_mark()
                                     self.repl_mark_status = True
                         else:
-                            if table_struce_key not in tmepdata.table_struct_list:
-                                column_list, pk_idex, column_type_list = self.__getcolumn(tmepdata.database_name,
-                                                                                               tmepdata.table_name)
-                                tmepdata.table_struct_list[table_struce_key] = column_list
-                                tmepdata.table_pk_idex_list[table_struce_key] = pk_idex
-                                tmepdata.table_struct_type_list[table_struce_key] = column_type_list
                             '''写入标签'''
                             if self.repl_mark_status is None:
                                 self.__set_mark()
@@ -343,11 +319,13 @@ class OperationDB(escape):
                     if self.repl_mark:
                         continue
                     tmepdata.thread_id,_db,_statement = _parse_event.read_query_event(event_length=event_length)
-                    _statement = _statement.decode('utf-8')
-                    _db = _db.decode('utf-8')
-                    if ('alter table' in _statement or 'ALTER TABLE' in _statement) and _db in self.databases:
-                        self.__check_stat(self.__raise_sql(sql = 'use {}'.format(_db),args=[]))
-                        self.__check_stat(self.__raise_sql(sql = _statement.replace('\n','').replace('\r',' '),args=[]))
+                    # _statement = _statement.decode('utf-8')
+                    # _db = _db.decode('utf-8')
+                    # if ('alter table' in _statement or 'ALTER TABLE' in _statement) and _db in self.databases:
+                    #     tmepdata.sql_list.append(['use {}'.format(_db),[]])
+                    #     tmepdata.sql_list.append([_statement.replace('\n','').replace('\r',' '),[]])
+                    #     #self.__check_stat(self.__raise_sql(sql = 'use {}'.format(_db),args=[]))
+                    #     #self.__check_stat(self.__raise_sql(sql = _statement.replace('\n','').replace('\r',' '),args=[]))
 
 
                 elif event_code == binlog_events.GTID_LOG_EVENT:
@@ -363,28 +341,25 @@ class OperationDB(escape):
                     在此做所有事务的提交操作
                     '''
                     save_gtid_value = json.dumps(tmepdata.excute_gtid) if tmepdata.excute_gtid else None
-                    _apply_conn = None
-                    if self.repl_mark:
-                        pass
-                    elif tmepdata.database_name in self.databases:
-                            if self.tables :
-                                if tmepdata.table_name in self.tables and self.xa:
-                                    _apply_conn = self.destination_conn
-                            else:
-                                _apply_conn = self.destination_conn
 
-                    self.__save_status(binlog_file_name, at_pos, next_pos,save_gtid_value,_apply_conn)
+                    tracaction_value = {'gtid':save_gtid_value,'gno_uid':self.gno_uid,
+                                        'binlog':binlog_file_name,'at_pos':at_pos,'next_pos':next_pos,
+                                        'sql_list':tmepdata.sql_list}
+                    append_state = self.append_data(values=tracaction_value)
+                    if append_state:
+                        tmepdata.excute_gtid = _gtid.copy() if _gtid else  None
 
-                    tmepdata.excute_gtid = _gtid.copy() if _gtid else  None
-
-                    tmepdata.sql_list = []
-                    self.xa = None
-                    self.repl_mark_status = None
-                    self.repl_mark = None
-                    continue
+                        tmepdata.sql_list = []
+                        self.xa = None
+                        self.repl_mark_status = None
+                        self.repl_mark = None
+                        continue
+                    else:
+                        Logging(msg='queue is full !!!!!',level='error')
+                        sys.exit()
         else:
             Logging(msg='replication failed................', level='error')
-            self.destination_conn.close()
+            #self.destination_conn.close()
             self.conn.close()
 
     def __set_mark(self):
@@ -394,78 +369,32 @@ class OperationDB(escape):
         '''
         sql = 'INSERT INTO repl_mark.mark_status(id,gtid,gno_id) VALUES(%s,%s,%s) ON DUPLICATE KEY UPDATE  gtid=%s,gno_id=%s;'
         tmepdata.sql_list.append([sql,[self.server_id,self.gno_uid,self.gno_id,self.gno_uid,self.gno_id]])
-        self.__check_stat(self.__raise_sql(sql, args=[self.server_id,self.gno_uid,self.gno_id,self.gno_uid,self.gno_id]))
+        #self.__check_stat(self.__raise_sql(sql, args=[self.server_id,self.gno_uid,self.gno_id,self.gno_uid,self.gno_id]))
 
-    def __save_status(self,binlog_file_name,at_pos,next_pos,save_gtid_value,_apply_conn):
+    def __get_all_table_struct(self):
         '''
-        保存同步状态值及提交数据修改
-        :param binlog_file_name:
-        :param at_pos:
-        :param next_pos:
-        :param save_gtid_value:
-        :param _apply_conn:
+        获取所有需要同步的表结构
         :return:
         '''
-        state = self._status_conn.SaveStatus(logname=binlog_file_name, at_pos=at_pos, next_pos=next_pos,
-                                             server_id=self.server_id,
-                                             gtid=save_gtid_value,
-                                             apply_conn=_apply_conn,
-                                             gno_uid=self.gno_uid)
-        if state:
-            return True
-        else:
-            Logging(msg='execute trancaction all sql try again',level='error')
-            self.__restart_trancaction_sql()
-            self.__save_status(binlog_file_name,at_pos,next_pos,save_gtid_value,None)
+        sql = 'select TABLE_SCHEMA,TABLE_NAME from INFORMATION_SCHEMA.COLUMNS GROUP BY TABLE_SCHEMA,TABLE_NAME;'
+        self.__check_stat(self.__raise_sql(sql=sql))
 
-    def __restart_trancaction_sql(self):
-        '''
-        在提交时链接断开的情况下需要重新执行所有事务操作
-        :return:
-        '''
-        self.__retry_connection_destion()
-        for row in tmepdata.sql_list:
-            self.__check_stat(self.__raise_sql(sql=row[0], args=row[1],retry=True,type=True))
-            self.__check_stat(self.__raise_sql('commit',type=True,retry=True))
+        result = self.destination_cur.fetchall()
+        if result:
+            for row in result:
+                table_schema = row['TABLE_SCHEMA']
+                table_name = row['TABLE_NAME']
+                table_struce_key = '{}:{}'.format(table_schema, table_name)
+                if table_schema in self.databases:
+                    if self.tables:
+                        if table_name in self.tables:
+                            tmepdata.table_struct_list[table_struce_key],tmepdata.table_pk_idex_list[table_struce_key],\
+                            tmepdata.table_struct_type_list[table_struce_key] = self.__getcolumn(table_schema,table_name)
+                    else:
+                        tmepdata.table_struct_list[table_struce_key], tmepdata.table_pk_idex_list[table_struce_key],\
+                        tmepdata.table_struct_type_list[table_struce_key] = self.__getcolumn(table_schema, table_name)
 
 
-    def __raise_sql(self,sql,args=[],type=None,retry=None):
-        '''
-        追加binlog数据到目标库
-        :param sql:
-        :param args:
-        :return:
-        '''
-        args = self.escape_string(args) if args else []
-        try:
-            if sql == 'commit':
-                self.destination_conn.commit()
-            else:
-                self.destination_cur.execute(sql,args)
-        except pymysql.Error as e:
-            Logging(msg=traceback.format_exc(), level='error')
-            if ErrorCode[e.args[0]]:
-                self.__retry_execute(sql=sql, args=args, type=type, retry=retry)
-            else:
-                Logging(msg='sql:{},values:{}'.format(sql,args), level='error')
-                Logging(msg=e, level='error')
-                return None
-        except:
-            Logging(msg=traceback.format_exc(), level='error')
-            return None
-        return True
-
-    def __retry_execute(self,sql,args=[],type=None,retry=None):
-        self.__retry_connection_destion()
-        if retry is None:
-            for row in tmepdata.sql_list:
-                self.__raise_sql(row[0],row[1])
-                #self.destination_cur.execute(row[0], row[1])
-        if type:
-            if sql == 'commit':
-                self.destination_conn.commit()
-            else:
-                self.__raise_sql(sql, args,type=type,retry=retry)
 
     def __getcolumn(self,*args):
         '''args顺序 database、tablename'''
@@ -473,19 +402,17 @@ class OperationDB(escape):
         column_type_list = []
 
         sql = 'select COLUMN_NAME,COLUMN_KEY,COLUMN_TYPE from INFORMATION_SCHEMA.COLUMNS where table_schema=%s and table_name=%s order by ORDINAL_POSITION;'
-        state = self.__raise_sql(sql = sql ,args=args,type=True)
-        if state:
-            result = self.destination_cur.fetchall()
-            pk_idex = []
-            for idex,row in enumerate(result):
-                column_list.append(row['COLUMN_NAME'])
-                column_type_list.append(row['COLUMN_TYPE'])
-                if row['COLUMN_KEY'] == 'PRI':
-                    pk_idex.append(idex)
-            return column_list,pk_idex,column_type_list
-        else:
-            Logging(msg='failed!!!!', level='error')
-            sys.exit()
+        self.__check_stat(self.__raise_sql(sql = sql,args=args))
+
+        result = self.destination_cur.fetchall()
+        pk_idex = []
+        for idex,row in enumerate(result):
+            column_list.append(row['COLUMN_NAME'])
+            column_type_list.append(row['COLUMN_TYPE'])
+            if row['COLUMN_KEY'] == 'PRI':
+                pk_idex.append(idex)
+        return column_list,pk_idex,column_type_list
+
 
     def __gtid_set(self,gtid):
         '''
@@ -498,7 +425,6 @@ class OperationDB(escape):
         for uuid in _gtid_list:
             _u = uuid.split(':')
             _gtid_dict[_u[0]] = _u[1]
-
         return _gtid_dict
 
 
@@ -533,41 +459,6 @@ class OperationDB(escape):
 
             time.sleep(1)
 
-    def __retry_connection_destion(self):
-        '''
-        目标库链接丢失重试60次，如果60次都失败将退出整个程序
-        使用30次的原因是有可能目标数据在发生宕机切换，如果30
-        秒都无法完成重连那表示数据库已经宕机或无法链接
-        :return:
-        '''
-        import time
-        for i in range(60):
-            Logging(msg='connection to destination db try agian!!!',level='info')
-            try:
-                self.destination_conn = InitMyDB(mysql_host=self.dhost, mysql_port=self.dport, mysql_user=self.duser,
-                                                 mysql_password=self.dpasswd,auto_commit=False).Init()
-                self.destination_cur = self.destination_conn.cursor()
-                Logging(msg='connection success!!!', level='info')
-                if self.binlog is None:
-                    self.destination_cur.execute('set sql_log_bin=0;')  # 设置binlog参数
-                self.destination_cur.execute('SET SESSION wait_timeout = 2147483;')
-                self.__set_mark()
-                return True
-            except:
-                Logging(msg=traceback.format_exc(),level='error')
-            time.sleep(1)
-        else:
-            Logging(msg='try 60 times to fail for conncetion destination db,exist now',level='error')
-            sys.exit()
-
-    def __check_stat(self,state):
-        if state:
-            pass
-        else:
-            Logging(msg='failed!!!!', level='error')
-            sys.exit()
-
-
     def __check_deamon_status(self,excute_gno_uid,excute_gtid):
         '''
         检查状态保存库(dump2db.dump_status)和标签库(repl_mark.mark_status)中
@@ -578,12 +469,9 @@ class OperationDB(escape):
         :return:
         '''
         sql = 'SELECT gtid,gno_id FROM repl_mark.mark_status where id = %s'
-        self.__check_stat(self.__raise_sql(sql=sql,args=self.server_id))
-        try:
-            result = self.destination_cur.fetchall()
-        except pymysql.Error as e:
-            Logging(msg=traceback.format_exc(),level='error')
-            self.__check_deamon_status(excute_gno_uid,excute_gtid)
+        self.__check_stat(self.__raise_sql(sql = sql,args=self.server_id))
+
+        result = self.destination_cur.fetchall()
         if result:
             gno_uid = result[0]['gtid']
             gno_id = result[0]['gno_id'] if gno_uid else None
@@ -599,5 +487,92 @@ class OperationDB(escape):
                 Logging(msg='The GTID in the state library is not the same as the GTID in the tag library. '
                             'It may be caused by a downtime switch. Continue to use the GTID in the state'
                             ' library....',level='warning')
+                excute_gtid[gno_uid] = '1-{}'.format(gno_id)
         excute_gtid = ','.join(['{}:{}'.format(uuid, excute_gtid[uuid]) for uuid in excute_gtid])
         return excute_gtid
+
+
+    def __raise_sql(self, sql, args=[]):
+        '''
+        追加binlog数据到目标库
+        :param sql:
+        :param args:
+        :return:
+        '''
+        args = self.escape_string(args) if args else []
+        try:
+            self.destination_cur.execute(sql, args)
+        except pymysql.Error as e:
+            Logging(msg='{}'.format(e.args), level='error')
+            if ErrorCode[e.args[0]]:
+                self.__retry_execute(sql=sql, args=args)
+            else:
+                Logging(msg='sql:{},values:{}'.format(sql, args), level='error')
+                Logging(msg=e, level='error')
+                return None
+        except:
+            Logging(msg=traceback.format_exc(), level='error')
+            return None
+        return True
+
+    def __retry_execute(self, sql, args=[]):
+        '''
+        异常重试
+        :param sql: sql语句
+        :param args: 参数列表
+        :param type: 是否需要重新执行该sql
+        :param retry: 是否是重新执行的sql
+        :return:
+        '''
+        self.__retry_connection_destion()
+        self.__check_stat(self.__raise_sql(sql, args))
+
+
+    def __retry_connection_destion(self):
+        '''
+        目标库链接丢失重试60次，如果60次都失败将退出整个程序
+        使用30次的原因是有可能目标数据在发生宕机切换，如果30
+        秒都无法完成重连那表示数据库已经宕机或无法链接
+        :return:
+        '''
+        import time
+        for i in range(60):
+            Logging(msg='connection to destination db try agian!!!', level='info')
+            try:
+                self.destination_conn = InitMyDB(mysql_host=self.dhost, mysql_port=self.dport,
+                                                 mysql_user=self.duser,
+                                                 mysql_password=self.dpasswd, auto_commit=False).Init()
+                self.destination_cur = self.destination_conn.cursor()
+                Logging(msg='connection success!!!', level='info')
+                self.destination_cur.execute('SET SESSION wait_timeout = 2147483;')
+                return True
+            except:
+                Logging(msg=traceback.format_exc(), level='error')
+            time.sleep(1)
+        else:
+            Logging(msg='try 60 times to fail for conncetion destination db,exist now', level='error')
+            sys.exit()
+
+    def __check_stat(self, state):
+        if state:
+            pass
+        else:
+            Logging(msg='failed!!!!', level='error')
+            sys.exit()
+
+
+    def append_data(self,values):
+        '''
+        向队列写入gtid事务数据,超时时间60秒
+        :param values: {'gtid':{},'gno_uid':'',gno_id:123,'binlog':'','at_pos':123,'next_pos':123,'sql_list':[[sql,[args]]}
+        :return:
+        '''
+        for i in range(60):
+            if self.queue.full():
+                time.sleep(1)
+                continue
+            self.queue.put(values)
+            return True
+        else:
+            return False
+

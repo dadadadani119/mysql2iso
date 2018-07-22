@@ -7,6 +7,9 @@ from lib import entrance
 from lib import get_conf
 from cluster import InitCluster
 from lib.Loging import Logging
+import queue
+
+my_queue = queue.Queue(2048)
 
 def init():
     _get = get_conf.GetIso()
@@ -35,8 +38,11 @@ def init():
             Logging(msg='invalid option cluster_type {}'.format(_argv['cluster_type']), level='warning')
     else:
         _argv = start(_argv['config'])
+
         with entrance.Entrance(_argv):
             pass
+
+
 
 
 def start(conf_name):

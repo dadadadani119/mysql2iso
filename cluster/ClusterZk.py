@@ -5,7 +5,7 @@
 @File    : ClusterZk.py
 @Software: PyCharm
 '''
-
+import threading
 from multiprocessing import Process
 import sys,time,random
 from contextlib import closing
@@ -13,6 +13,9 @@ from .ClusterHeart import zkheartbeat
 sys.path.append("..")
 from lib.zkhandle import zkHander
 from lib.Loging import Logging
+import queue
+
+my_queue = queue.Queue(2048)  # 同步线程与目标库执行线程之间的通信队列，队列中存储以GTID为单位的sql数据内容，最大存储2048个GTID事务
 
 class ClusterOp:
     def __init__(self,task_list,zk_hosts):
@@ -21,6 +24,7 @@ class ClusterOp:
         self.task_thread_list = {}
         self.watch_thread_list = {}
         self.heart_thread_list = {}
+
 
     def __enter__(self):
         '''
@@ -37,16 +41,19 @@ class ClusterOp:
         while True:
 
             if self.task_thread_list:
+                #不管源库读取任务、目标库操作任务其中一个宕机将直接退出任务
                 for task_name in self.task_thread_list:
-                    if self.task_thread_list[task_name].is_alive():
-                        pass
-                    else:
-                        Logging(msg='replication thread {} is down '.format(self.task_thread_list[task_name]),level='error')
-                        self.task_thread_list[task_name].terminate()
-                        del self.task_thread_list[task_name]
-                        Logging(msg='stop heart thread {} is down '.format(self.heart_thread_list[task_name]),level='error')
-                        self.heart_thread_list[task_name].terminate()
-                        del self.heart_thread_list[task_name]
+                    for thread in self.task_thread_list[task_name]:
+                        if thread.is_alive():
+                            pass
+                        else:
+                            Logging(msg='replication thread {} is down '.format(self.task_thread_list[task_name]),level='error')
+                            for t in self.task_thread_list[task_name]:
+                                t.terminate()
+                            del self.task_thread_list[task_name]
+                            Logging(msg='stop heart thread {} is down '.format(self.heart_thread_list[task_name]),level='error')
+                            self.heart_thread_list[task_name].terminate()
+                            del self.heart_thread_list[task_name]
             if self.watch_thread_list:
                 for task_name in self.watch_thread_list:
                     if self.watch_thread_list[task_name].is_alive():
@@ -80,9 +87,14 @@ class ClusterOp:
             self.heart_thread_list[task_name] = heart_p
             # 启动任务
             if heart_p.is_alive():
-                task_p = ThreadDump(task_name=task_name, zk_hosts=self.zk_hosts, type='repl',_argv=self.task_list[task_name])
+                #源库同步线程
+                task_p = ThreadDump(task_name=task_name, type='repl',_argv=dict(self.task_list[task_name],**{'queue':my_queue}))
                 task_p.start()
-                self.task_thread_list[task_name] = task_p
+                #目标库写入线程
+                task_d = ThreadDump(task_name=task_name, type='repl_des',_argv=dict(self.task_list[task_name],**{'queue':my_queue}))
+                task_d.start()
+
+                self.task_thread_list[task_name] = [task_p,task_d]
             time.sleep(60)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -90,9 +102,11 @@ class ClusterOp:
 
 
 
-class ThreadDump(Process):
+# class ThreadDump(Process):
+class ThreadDump(threading.Thread):
     def __init__(self,type=None,task_name=None,zk_hosts=None,_argv=None):
-        super(ThreadDump, self).__init__()
+        #super(ThreadDump, self).__init__()
+        threading.Thread.__init__(self)
         self.type = type            #类型，watch、repl、heart
         self.task_name = task_name
         self.zk_hosts = zk_hosts
@@ -110,6 +124,10 @@ class ThreadDump(Process):
         elif self.type == 'repl':
             from lib.entrance import Entrance
             with Entrance(self._argv) as en:
+                pass
+        elif self.type == 'repl_des':
+            from lib.destination import destination
+            with destination(**self._argv) as des:
                 pass
         elif self.type == 'heart':
             zkheartbeat(zk_hosts=self.zk_hosts,task_name=self.task_name).run()

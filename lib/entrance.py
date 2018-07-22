@@ -10,6 +10,7 @@ from .OperationDB import OperationDB
 
 class Entrance(Metadata.TableMetadata):
     def __init__(self,kargs):
+        self.queue = kargs['queue']
         self.binlog_file = kargs['binlog_file']
         self.start_position = kargs['start_position']
         self.gtid = kargs['gtid']
@@ -59,7 +60,7 @@ class Entrance(Metadata.TableMetadata):
                     server_id=self.server_id,binlog=self.binlog,full_dump=self.full_dump,threads=self.threads,
                     ithread=self.ithread,gtid=self.gtid,auto_position=self.auto_position,ssl=self.ssl,cert=self.cert,
                     key=self.key,daemon=self.daemon,shost=self.shost,sport=self.sport,suser=self.suser,
-                    spassword=self.spassword,sbinlog=self.sbinlog).Operation()
+                    spassword=self.spassword,sbinlog=self.sbinlog,queue=self.queue).Operation()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
