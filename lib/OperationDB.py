@@ -36,7 +36,7 @@ class OperationDB(escape):
         self.ssl_auth = {'cert':kwargs['cert'],'key':kwargs['key']} if kwargs['ssl'] else None
         self.daemon = kwargs['daemon']
         self.queue = kwargs['queue']
-        print('op: {}'.format(self.queue))
+        #print('op: {}'.format(self.queue))
         self.full_dump = kwargs['full_dump']                                                                                                        #是否全量导出
         self.threads = kwargs['threads']                                                                                                            #全量导出时并发线程
 
@@ -58,6 +58,8 @@ class OperationDB(escape):
         self._status_conn = None
         self.gno_uid = None                                                                                                                         #binlog中读取到当前事务的gtid
         self.gno_id = None                                                                                                                          #binlog读取到gtid的gno
+
+        self.at_pos = None
 
         self.trancaction_list = []                                                                                                                  #已执行的事务sql,用于重连之后重新执行
 
@@ -85,17 +87,32 @@ class OperationDB(escape):
         初始化同步所需的源库、目标库的链接
         :return:
         '''
-        self.destination_conn = InitMyDB(mysql_host=self.dhost, mysql_port=self.dport, mysql_user=self.duser,
-                                         mysql_password=self.dpasswd,auto_commit=False).Init()
+        for i in range(60):
+            self.destination_conn = InitMyDB(mysql_host=self.dhost, mysql_port=self.dport, mysql_user=self.duser,
+                                             mysql_password=self.dpasswd,auto_commit=False).Init()
 
-        self.destination_cur = self.destination_conn.cursor()
+            try:
+                self.destination_cur = self.destination_conn.cursor()
 
-        if self.binlog is None:
-            self.destination_cur.execute('set sql_log_bin=0;')  # 设置binlog参数
-        self.destination_cur.execute('SET SESSION wait_timeout = 2147483;')
+                if self.binlog is None:
+                    self.destination_cur.execute('set sql_log_bin=0;')  # 设置binlog参数
+                self.destination_cur.execute('SET SESSION wait_timeout = 2147483;')
 
-        self.conn = InitMyDB(mysql_host=self.host, mysql_port=self.port, mysql_user=self.user,
-                             mysql_password=self.passwd, unix_socket=self.unix_socket,ssl=self.ssl_auth).Init()
+                self.conn = InitMyDB(mysql_host=self.host, mysql_port=self.port, mysql_user=self.user,
+                                     mysql_password=self.passwd, unix_socket=self.unix_socket, ssl=self.ssl_auth).Init()
+                return
+            except pymysql.Error as e:
+                Logging(msg=e.args,level='error')
+            time.sleep(1)
+        else:
+            Logging(msg='destination db connection failed !!!',level='error')
+            sys.exit()
+
+    def __init_status_conn(self):
+
+        self._status_conn = GetStruct(host=self.shost, port=self.sport, user=self.suser, passwd=self.spassword,
+                                      binlog=self.sbinlog)  # 状态库链接类初始化
+        self._status_conn.CreateTmp()
 
     def WhereJoin(self,table_struce_key):
         return ' AND '.join(['`{}`=%s'.format(col) for col in tmepdata.table_struct_list[table_struce_key]])
@@ -125,6 +142,7 @@ class OperationDB(escape):
         else:
             __pk_idx = None
 
+        _tmp_sql_list = []
         if event_code == binlog_events.UPDATE_ROWS_EVENT:
             __values = [_values[i:i + 2] for i in range(0, len(_values), 2)]
             for row_value in __values:
@@ -140,8 +158,7 @@ class OperationDB(escape):
                                                                    self.SetJoin(table_struce_key),
                                                                    self.WhereJoin(table_struce_key))
                     _args = row_value[1] + row_value[0]
-
-                tmepdata.sql_list.append([cur_sql,_args])
+                _tmp_sql_list.append([cur_sql,_args])
 
         else:
             if event_code == binlog_events.WRITE_ROWS_EVENT:
@@ -151,7 +168,7 @@ class OperationDB(escape):
                 all_values = []
                 for value in _values:
                     all_values += value
-                tmepdata.sql_list.append([cur_sql,all_values])
+                _tmp_sql_list.append([cur_sql,all_values])
             elif event_code == binlog_events.DELETE_ROWS_EVENT:
                 for value in _values:
                     if __pk_idx is not None:
@@ -163,14 +180,32 @@ class OperationDB(escape):
                     else:
                         cur_sql = 'DELETE FROM {}.{} WHERE {};'.format(tmepdata.database_name,tmepdata.table_name,self.WhereJoin(table_struce_key))
                         _args = value
-                    tmepdata.sql_list.append([cur_sql,_args])
+                    _tmp_sql_list.append([cur_sql,_args])
+        tmepdata.sql_list.append([_tmp_sql_list, tmepdata.database_name, tmepdata.table_name, self.at_pos])
 
     def __execute_code(self,_parse_event,event_code,event_length,table_struce_key):
-        _values = _parse_event.GetValue(type_code=event_code, event_length=event_length,
+        '''
+        在此需要对库、表进行再次判断，因为在一个GTID中可能有包含非需要的库表操作，这样会时mark标签失效
+        :param _parse_event:
+        :param event_code:
+        :param event_length:
+        :param table_struce_key:
+        :return:
+        '''
+        if tmepdata.database_name in self.databases:
+            if self.tables:
+                if tmepdata.table_name in self.tables:
+                    _values = _parse_event.GetValue(type_code=event_code, event_length=event_length,
                                         cloums_type_id_list=tmepdata.cloums_type_id_list,
                                         metadata_dict=tmepdata.metadata_dict,
                                         unsigned_list=tmepdata.table_struct_type_list[table_struce_key])
-        self.GetSQL(_values=_values, event_code=event_code)
+                    self.GetSQL(_values=_values, event_code=event_code)
+            else:
+                _values = _parse_event.GetValue(type_code=event_code, event_length=event_length,
+                                                cloums_type_id_list=tmepdata.cloums_type_id_list,
+                                                metadata_dict=tmepdata.metadata_dict,
+                                                unsigned_list=tmepdata.table_struct_type_list[table_struce_key])
+                self.GetSQL(_values=_values, event_code=event_code)
 
     def Operation(self):
         '''
@@ -196,12 +231,12 @@ class OperationDB(escape):
         如有全量导出使用导出开始时记录的binlog信息，不然使用传入参数的值
         '''
         self.__init_master_slave_conn()  # 初始化源库、目标库同步链接
-        self._status_conn = GetStruct(host=self.shost, port=self.sport, user=self.suser, passwd=self.spassword,
-                                      binlog=self.sbinlog)  #状态库链接类初始化
-        self._status_conn.CreateTmp()
+
         if self.daemon:
+            self.__init_status_conn()  # 初始化状态库
             _binlog_file, _binlog_pos, _excute_gtid ,gtid_uid = self._status_conn.get_daemon_info(self.server_id)
-            _excute_gtid = self.__check_deamon_status(gtid_uid,_excute_gtid)
+            self._status_conn.close()
+            _excute_gtid = ','.join(['{}:{}'.format(uuid, _excute_gtid[uuid]) for uuid in _excute_gtid])
         Logging(msg='replication to master.............', level='info')
 
 
@@ -211,6 +246,7 @@ class OperationDB(escape):
             Logging(msg='binlog: {} position: {} gtid : {}'.format(_binlog_file, _binlog_pos, _excute_gtid),
                     level='info')
             '''初始化要记录得gtid'''
+            #print(_excute_gtid)
             _gtid = self.__gtid_set(_excute_gtid) if _excute_gtid else None
 
             ReplConn = ReplicationMysql(**rep_info).ReadPack()
@@ -227,7 +263,6 @@ class OperationDB(escape):
         table_struce_key = None
         binlog_file_name = _binlog_file if self.full_dump else self.binlog_file
 
-        #_mysql_conn = GetStruct(host=self.dhost, port=self.dport,user=self.duser,passwd=self.dpasswd)
 
 
 
@@ -248,14 +283,14 @@ class OperationDB(escape):
             self.destination_conn.close()
 
             while 1:
-                at_pos = next_pos
+                self.at_pos = next_pos
                 try:
                     pkt = ReplConn._read_packet()
                 except pymysql.OperationalError:
                     '''链接断开重新注册'''
                     Logging(msg='retry to regist master', level='error')
                     ReplConn = self.__retry_regist_master(gtid=tmepdata.excute_gtid, binlog=binlog_file_name,
-                                                          position=at_pos)
+                                                          position=self.at_pos)
                 except:
                     Logging(msg=traceback.format_exc(), level='error')
                     ReplConn.close()
@@ -304,12 +339,12 @@ class OperationDB(escape):
                             if tmepdata.table_name in self.tables:
                                 '''写入标签'''
                                 if self.repl_mark_status is None:
-                                    self.__set_mark()
+                                    #self.__set_mark()
                                     self.repl_mark_status = True
                         else:
                             '''写入标签'''
                             if self.repl_mark_status is None:
-                                self.__set_mark()
+                                #self.__set_mark()
                                 self.repl_mark_status = True
 
                 elif event_code == binlog_events.ROTATE_EVENT:
@@ -319,14 +354,6 @@ class OperationDB(escape):
                     if self.repl_mark:
                         continue
                     tmepdata.thread_id,_db,_statement = _parse_event.read_query_event(event_length=event_length)
-                    # _statement = _statement.decode('utf-8')
-                    # _db = _db.decode('utf-8')
-                    # if ('alter table' in _statement or 'ALTER TABLE' in _statement) and _db in self.databases:
-                    #     tmepdata.sql_list.append(['use {}'.format(_db),[]])
-                    #     tmepdata.sql_list.append([_statement.replace('\n','').replace('\r',' '),[]])
-                    #     #self.__check_stat(self.__raise_sql(sql = 'use {}'.format(_db),args=[]))
-                    #     #self.__check_stat(self.__raise_sql(sql = _statement.replace('\n','').replace('\r',' '),args=[]))
-
 
                 elif event_code == binlog_events.GTID_LOG_EVENT:
                     '''
@@ -340,10 +367,10 @@ class OperationDB(escape):
                     xid_event是整个gtid事务结束的标志
                     在此做所有事务的提交操作
                     '''
-                    save_gtid_value = json.dumps(tmepdata.excute_gtid) if tmepdata.excute_gtid else None
+                    save_gtid_value = json.dumps(_gtid) if _gtid else None
 
-                    tracaction_value = {'gtid':save_gtid_value,'gno_uid':self.gno_uid,
-                                        'binlog':binlog_file_name,'at_pos':at_pos,'next_pos':next_pos,
+                    tracaction_value = {'gtid':save_gtid_value,'gno_uid':self.gno_uid,'gno_id':self.gno_id,
+                                        'binlog':binlog_file_name,'at_pos':self.at_pos,'next_pos':next_pos,
                                         'sql_list':tmepdata.sql_list}
                     append_state = self.append_data(values=tracaction_value)
                     if append_state:
@@ -355,12 +382,14 @@ class OperationDB(escape):
                         self.repl_mark = None
                         continue
                     else:
-                        Logging(msg='queue is full !!!!!',level='error')
+                        Logging(msg='thre binlog queue is full !!!!!',level='error')
                         sys.exit()
+
         else:
             Logging(msg='replication failed................', level='error')
-            #self.destination_conn.close()
+
             self.conn.close()
+
 
     def __set_mark(self):
         '''
@@ -369,7 +398,7 @@ class OperationDB(escape):
         '''
         sql = 'INSERT INTO repl_mark.mark_status(id,gtid,gno_id) VALUES(%s,%s,%s) ON DUPLICATE KEY UPDATE  gtid=%s,gno_id=%s;'
         tmepdata.sql_list.append([sql,[self.server_id,self.gno_uid,self.gno_id,self.gno_uid,self.gno_id]])
-        #self.__check_stat(self.__raise_sql(sql, args=[self.server_id,self.gno_uid,self.gno_id,self.gno_uid,self.gno_id]))
+
 
     def __get_all_table_struct(self):
         '''
@@ -393,6 +422,7 @@ class OperationDB(escape):
                     else:
                         tmepdata.table_struct_list[table_struce_key], tmepdata.table_pk_idex_list[table_struce_key],\
                         tmepdata.table_struct_type_list[table_struce_key] = self.__getcolumn(table_schema, table_name)
+
 
 
 
@@ -459,39 +489,6 @@ class OperationDB(escape):
 
             time.sleep(1)
 
-    def __check_deamon_status(self,excute_gno_uid,excute_gtid):
-        '''
-        检查状态保存库(dump2db.dump_status)和标签库(repl_mark.mark_status)中
-        保存已执行的GTID，如果标签库中大于状态库，将使用标签库中的GTID，因为事务提交
-        过程是先提交数据再提交状态库
-        :param excute_gno_uid:
-        :param excute_gtid:
-        :return:
-        '''
-        sql = 'SELECT gtid,gno_id FROM repl_mark.mark_status where id = %s'
-        self.__check_stat(self.__raise_sql(sql = sql,args=self.server_id))
-
-        result = self.destination_cur.fetchall()
-        if result:
-            gno_uid = result[0]['gtid']
-            gno_id = result[0]['gno_id'] if gno_uid else None
-            if gno_uid == excute_gno_uid:
-                execut_gno = int((excute_gtid[gno_uid].split('-'))[1])
-                if execut_gno <= gno_id:
-                    excute_gtid[gno_uid] = '1-{}'.format(gno_id)
-                else:
-                    Logging(msg='The GTID in the state library to execute is greater than the GTID in the tag '
-                                'library, which may trigger a large fault logic or there are filtering operations, '
-                                'continu..... but please check db',level='error')
-            else:
-                Logging(msg='The GTID in the state library is not the same as the GTID in the tag library. '
-                            'It may be caused by a downtime switch. Continue to use the GTID in the state'
-                            ' library....',level='warning')
-                excute_gtid[gno_uid] = '1-{}'.format(gno_id)
-        excute_gtid = ','.join(['{}:{}'.format(uuid, excute_gtid[uuid]) for uuid in excute_gtid])
-        return excute_gtid
-
-
     def __raise_sql(self, sql, args=[]):
         '''
         追加binlog数据到目标库
@@ -504,12 +501,13 @@ class OperationDB(escape):
             self.destination_cur.execute(sql, args)
         except pymysql.Error as e:
             Logging(msg='{}'.format(e.args), level='error')
-            if ErrorCode[e.args[0]]:
-                self.__retry_execute(sql=sql, args=args)
-            else:
-                Logging(msg='sql:{},values:{}'.format(sql, args), level='error')
-                Logging(msg=e, level='error')
-                return None
+            if e.args[0] in ErrorCode:
+                if ErrorCode[e.args[0]]:
+                    self.__retry_execute(sql=sql, args=args)
+                    return True
+            Logging(msg='sql:{},values:{}'.format(sql, args), level='error')
+            Logging(msg=e, level='error')
+            return None
         except:
             Logging(msg=traceback.format_exc(), level='error')
             return None
@@ -542,10 +540,16 @@ class OperationDB(escape):
                 self.destination_conn = InitMyDB(mysql_host=self.dhost, mysql_port=self.dport,
                                                  mysql_user=self.duser,
                                                  mysql_password=self.dpasswd, auto_commit=False).Init()
-                self.destination_cur = self.destination_conn.cursor()
-                Logging(msg='connection success!!!', level='info')
-                self.destination_cur.execute('SET SESSION wait_timeout = 2147483;')
-                return True
+                if self.destination_conn:
+                    self.destination_cur = self.destination_conn.cursor()
+                    Logging(msg='connection success!!!', level='info')
+                    try:
+                        self.destination_cur.execute('SET SESSION wait_timeout = 2147483;')
+                        return True
+                    except pymysql.Error as e:
+                        Logging(msg=e.args,level='error')
+                        if ErrorCode[e.args[0]]:
+                            self.__retry_connection_destion()
             except:
                 Logging(msg=traceback.format_exc(), level='error')
             time.sleep(1)
@@ -563,8 +567,8 @@ class OperationDB(escape):
 
     def append_data(self,values):
         '''
-        向队列写入gtid事务数据,超时时间60秒
-        :param values: {'gtid':{},'gno_uid':'',gno_id:123,'binlog':'','at_pos':123,'next_pos':123,'sql_list':[[sql,[args]]}
+        向队列写入gtid事务数据,超时时间60秒,60秒内队列为被消费将直接退出
+        :param values: {'gtid':{},'gno_uid':'',gno_id:123,'binlog':'','at_pos':123,'next_pos':123,'sql_list':[[sql,[args...],db,tabl],....]}
         :return:
         '''
         for i in range(60):
@@ -575,4 +579,5 @@ class OperationDB(escape):
             return True
         else:
             return False
+
 

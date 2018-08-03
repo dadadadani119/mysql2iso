@@ -20,5 +20,4 @@ class ThreadDump(threading.Thread):
         '''
         while True:
             data, addr = self.s.recvfrom(1024)
-            print(data)
             self.global_queue.put([addr,data])

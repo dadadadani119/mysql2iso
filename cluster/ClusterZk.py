@@ -13,9 +13,11 @@ from .ClusterHeart import zkheartbeat
 sys.path.append("..")
 from lib.zkhandle import zkHander
 from lib.Loging import Logging
-import queue
+from lib.ThreadManager import ThreadDump
+from multiprocessing import Queue
+#import queue
 
-my_queue = queue.Queue(2048)  # 同步线程与目标库执行线程之间的通信队列，队列中存储以GTID为单位的sql数据内容，最大存储2048个GTID事务
+my_queue = Queue(2048)  # 同步线程与目标库执行线程之间的通信队列，队列中存储以GTID为单位的sql数据内容，最大存储2048个GTID事务
 
 class ClusterOp:
     def __init__(self,task_list,zk_hosts):
@@ -49,7 +51,10 @@ class ClusterOp:
                         else:
                             Logging(msg='replication thread {} is down '.format(self.task_thread_list[task_name]),level='error')
                             for t in self.task_thread_list[task_name]:
-                                t.terminate()
+                                try:
+                                    t.terminate()
+                                except:
+                                    pass
                             del self.task_thread_list[task_name]
                             Logging(msg='stop heart thread {} is down '.format(self.heart_thread_list[task_name]),level='error')
                             self.heart_thread_list[task_name].terminate()
@@ -102,32 +107,32 @@ class ClusterOp:
 
 
 
-# class ThreadDump(Process):
-class ThreadDump(threading.Thread):
-    def __init__(self,type=None,task_name=None,zk_hosts=None,_argv=None):
-        #super(ThreadDump, self).__init__()
-        threading.Thread.__init__(self)
-        self.type = type            #类型，watch、repl、heart
-        self.task_name = task_name
-        self.zk_hosts = zk_hosts
-        self._argv = _argv
-    def run(self):
-        '''
-        启动监听或者服务线程
-        :return:
-        '''
-        if self.type == 'watch':
-            i = 0
-            while i < 1000000:
-                time.sleep(3600)
-                i += 1
-        elif self.type == 'repl':
-            from lib.entrance import Entrance
-            with Entrance(self._argv) as en:
-                pass
-        elif self.type == 'repl_des':
-            from lib.destination import destination
-            with destination(**self._argv) as des:
-                pass
-        elif self.type == 'heart':
-            zkheartbeat(zk_hosts=self.zk_hosts,task_name=self.task_name).run()
+# # class ThreadDump(Process):
+# class ThreadDump(threading.Thread):
+#     def __init__(self,type=None,task_name=None,zk_hosts=None,_argv=None):
+#         #super(ThreadDump, self).__init__()
+#         threading.Thread.__init__(self)
+#         self.type = type            #类型，watch、repl、heart
+#         self.task_name = task_name
+#         self.zk_hosts = zk_hosts
+#         self._argv = _argv
+#     def run(self):
+#         '''
+#         启动监听或者服务线程
+#         :return:
+#         '''
+#         if self.type == 'watch':
+#             i = 0
+#             while i < 1000000:
+#                 time.sleep(3600)
+#                 i += 1
+#         elif self.type == 'repl':
+#             from lib.entrance import Entrance
+#             with Entrance(self._argv) as en:
+#                 pass
+#         elif self.type == 'repl_des':
+#             from lib.destination import destination
+#             with destination(**self._argv) as des:
+#                 pass
+#         elif self.type == 'heart':
+#             zkheartbeat(zk_hosts=self.zk_hosts,task_name=self.task_name).run()

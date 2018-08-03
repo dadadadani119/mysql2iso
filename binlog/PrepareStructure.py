@@ -20,16 +20,34 @@ class GetStruct:
         self.socket = socket
         self.binlog = binlog
 
-        self.connection = InitMyDB(mysql_host=self.host,mysql_port=self.port,mysql_user=self.user,
-                                   mysql_password=self.passwd,unix_socket=self.socket,auto_commit=False).Init()
-        self.cur = self.connection.cursor()
-        if binlog:
-            pass
-        else:
-            self.cur.execute('set sql_log_bin=0;')
+        self.connection = None
+        self.cur = None
+        self.__init_status()
+
         self.apply_conn = None
 
         self.insert_sql_list = []
+
+    def __init_status(self):
+        '''
+        首次初始化链接
+        :return:
+        '''
+        for i in range(60):
+            try:
+                self.connection = InitMyDB(mysql_host=self.host, mysql_port=self.port, mysql_user=self.user,
+                                           mysql_password=self.passwd, unix_socket=self.socket, auto_commit=False).Init()
+                if self.connection:
+                    self.cur = self.connection.cursor()
+                    if self.binlog is None:
+                        self.cur.execute('set sql_log_bin=0;')
+                    break
+            except pymysql.Error as e:
+                Logging(msg=e.args,level='error')
+            time.sleep(1)
+        else:
+            Logging(msg='retry 60 time on status db is failed,exist thread now',level='error')
+            sys.exit()
 
     def CreateTmp(self):
         self.__raise('CREATE DATABASE IF NOT EXISTS dump2db;')                                                                      #创建临时库

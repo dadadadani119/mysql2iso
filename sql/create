@@ -1,8 +1,10 @@
 CREATE DATABASE repl_mark;
 
 CREATE TABLE `repl_mark`.`mark_status` (
-  `id` int(11) NOT NULL,
-  `gtid` varchar(64) NOT NULL,
+  `db_name` varchar(64) NOT NULL,
+  `tbl_name` varchar(64) NOT NULL,
+  `gno_uid` varchar(64) NOT NULL,
   `gno_id` bigint NOT NULL,
-  PRIMARY KEY (`id`)
+  `at_pos` bigint NOT NULL,
+  PRIMARY KEY (`db_name`,`tbl_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

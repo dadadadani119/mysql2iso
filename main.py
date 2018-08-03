@@ -3,8 +3,8 @@
 @author: Great God
 '''
 import os
-from lib import entrance
 from lib import get_conf
+from lib import SingeTask
 from cluster import InitCluster
 from lib.Loging import Logging
 import queue
@@ -26,6 +26,8 @@ def init():
         for file in file_list:
             task_list[file.split('.')[0]] = start(file)
         if _argv['cluster_type'] == 'zk_mode':
+
+
             with InitCluster.ClusterEnt(**dict(task_list,**{'zk_hosts':_argv['zk_hosts'],
                                                             'cluster_type':_argv['cluster_type']})):
                 pass
@@ -37,12 +39,8 @@ def init():
         else:
             Logging(msg='invalid option cluster_type {}'.format(_argv['cluster_type']), level='warning')
     else:
-        _argv = start(_argv['config'])
-
-        with entrance.Entrance(_argv):
+        with SingeTask.SingeTask(**(start(_argv['config']))):
             pass
-
-
 
 
 def start(conf_name):
@@ -52,7 +50,7 @@ def start(conf_name):
     return _argv
 
 
+
 if __name__ == "__main__":
-    #main(sys.argv)
     init()
 

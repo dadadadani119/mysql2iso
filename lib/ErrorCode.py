@@ -57,4 +57,6 @@ ErrorCode = {
     1406:   None,   #Data too long for column '%s' at row %ld
     2013:   True,   #Lost connection to MySQL server during query
     2003:   True,   #Can't connect to MySQL server on '10.3.10.11' ([Errno 111] Connection refused)
+    1213:   True,   #eadlock found when trying to get lock; try restarting transaction
+    2006:   True,   #MySQL server has gone away (ConnectionResetError(104, 'Connection reset by peer'))
     }

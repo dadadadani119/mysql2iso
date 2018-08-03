@@ -5,29 +5,33 @@
 @File    : destination.py
 @Software: PyCharm
 '''
-import sys,pymysql,traceback
-import time
-from .ErrorCode import ErrorCode
+import sys
+import time,uuid
 from .Loging import Logging
-from .InitDB import InitMyDB
+from .DesThread import desthread
 from .escape import escape
 sys.path.append("..")
 from binlog.PrepareStructure import GetStruct
+import threading,queue
+des_queue = queue.Queue(1024)
+error_queue = queue.Queue(10)
 
+thread_lock = threading.Lock()      #控制单个表并发执行的锁
+thread_lock_queue = {}              #获取到锁之后执行顺序控制，{'db:tbl':[thread_id,thread_id],....}
+
+chunk_list_status = []              #用于在目标库分块执行时记录每个块执行情况，按入队列顺序报存，当该小块执行完时记录binlog同步状态
+                                    #格式[['uuid',length,{status}],......]
+chunk_list_status_th = {}           #用于多线程之间同步分块执行情况，这两个变量主要用于binlog状态保存，只有当全部执行才记录，用于宕
+                                    #机切换时同步一致性控制，格式{'uuid':[thread_id,thread_id...],....}
 
 class destination(escape):
     def __init__(self, **kwargs):
         super(destination, self).__init__()
+
         self.queue = kwargs['queue']
-        print('ds : {}'.format(self.queue))
-        self.dhost, self.dport, self.duser, self.dpasswd = kwargs['dhost'], kwargs['dport'], kwargs['duser'], kwargs['dpassword']  # 目标库连接相关信息
-        self.binlog = kwargs['binlog']  # 是否在目标库记录binlog的参数
+        #print('ds : {}'.format(self.queue))
 
-        self.destination_conn = None
-        self.destination_cur = None
-
-        self.trancaction_list = []  # 已执行的事务sql,用于重连之后重新执行
-        self._status_conn = None
+        self.save_append_status = {}
 
         self.server_id = kwargs['server_id']
 
@@ -37,166 +41,190 @@ class destination(escape):
         self.spassword = kwargs['spassword']
         self.sbinlog = kwargs['sbinlog']
 
-        self.__init_slave_conn()
+        self.error_queue = None
+        self.kwargs = kwargs.copy()
+        self.kwargs['queue'] = des_queue
+        self.kwargs['error_queue'] = error_queue
 
-    def __init_slave_conn(self):
-        '''
-        初始化同步所需的状态库、目标库的链接
-        :return:
-        '''
-        self.destination_conn = InitMyDB(mysql_host=self.dhost, mysql_port=self.dport, mysql_user=self.duser,
-                                         mysql_password=self.dpasswd, auto_commit=False).Init()
-        self.destination_cur = self.destination_conn.cursor()
+        self.th_list = []
+        self.__init_status_conn()
 
-        if self.binlog is None:
-            self.destination_cur.execute('set sql_log_bin=0;')  # 设置binlog参数
-        self.destination_cur.execute('SET SESSION wait_timeout = 2147483;')
-
+    def __init_status_conn(self):
         self._status_conn = GetStruct(host=self.shost, port=self.sport, user=self.suser, passwd=self.spassword,
                                       binlog=self.sbinlog)  # 状态库链接类初始化
         self._status_conn.CreateTmp()
 
-    def __save_status(self, binlog_file_name, at_pos, next_pos, save_gtid_value, _apply_conn, gno_uid):
-        '''
-        保存同步状态值及提交数据修改
-        :param binlog_file_name:
-        :param at_pos:
-        :param next_pos:
-        :param save_gtid_value:
-        :param _apply_conn:
-        :return:
-        '''
-        state = self._status_conn.SaveStatus(logname=binlog_file_name, at_pos=at_pos, next_pos=next_pos,
-                                             server_id=self.server_id,
-                                             gtid=save_gtid_value,
-                                             apply_conn=_apply_conn,
-                                             gno_uid=gno_uid)
+    def __check_stat(self, state,only_state=None):
         if state:
-            return True
-        else:
-            Logging(msg='execute trancaction all sql try again', level='error')
-            self.__restart_trancaction_sql()
-            self.__save_status(binlog_file_name, at_pos, next_pos, save_gtid_value, _apply_conn)
-
-    def __restart_trancaction_sql(self):
-        '''
-        在提交时链接断开的情况下需要重新执行所有事务操作
-        :return:
-        '''
-        self.__retry_connection_destion()
-        for row in self.trancaction_list:
-            self.__check_stat(self.__raise_sql(sql=row[0], args=row[1], retry=True))
-        #self.__check_stat(self.__raise_sql('commit',retry=True))
-        return
-
-    def __raise_sql(self, sql, args=[],retry=None):
-        '''
-        追加binlog数据到目标库
-        :param sql:
-        :param args:
-        :return:
-        '''
-        args = self.escape_string(args) if args else []
-        try:
-            if sql == 'commit':
-                self.destination_conn.commit()
-            else:
-                self.destination_cur.execute(sql, args)
-        except pymysql.Error as e:
-            Logging(msg=traceback.format_exc(), level='error')
-            if ErrorCode[e.args[0]]:
-                self.__retry_execute(retry=retry)
-            else:
-                Logging(msg='sql:{},values:{}'.format(sql, args), level='error')
-                Logging(msg=e, level='error')
-                return None
-        except:
-            Logging(msg=traceback.format_exc(), level='error')
-            return None
-        return True
-
-    def __retry_execute(self,retry=None):
-        '''
-        异常重试
-        :param sql: sql语句
-        :param args: 参数列表
-        :param type: 是否需要重新执行该sql
-        :param retry: 是否是重新执行的sql
-        :return:
-        '''
-        self.__retry_connection_destion()
-        if retry is None:
-            # for row in tmepdata.sql_list:
-            Logging(msg='retry execute trancaction list, list length {}'.format(len(self.trancaction_list)),
-                    level='info')
-            for row in self.trancaction_list:
-                self.__raise_sql(row[0], row[1])
-            return
-                # self.destination_cur.execute(row[0], row[1])
-        elif retry:
-            self.__restart_trancaction_sql()
-
-
-    def __retry_connection_destion(self):
-        '''
-        目标库链接丢失重试60次，如果60次都失败将退出整个程序
-        使用30次的原因是有可能目标数据在发生宕机切换，如果30
-        秒都无法完成重连那表示数据库已经宕机或无法链接
-        :return:
-        '''
-        import time
-        for i in range(60):
-            Logging(msg='connection to destination db try agian!!!', level='info')
-            try:
-                self.destination_conn = InitMyDB(mysql_host=self.dhost, mysql_port=self.dport,
-                                                 mysql_user=self.duser,
-                                                 mysql_password=self.dpasswd, auto_commit=False).Init()
-                self.destination_cur = self.destination_conn.cursor()
-                Logging(msg='connection success!!!', level='info')
-                if self.binlog is None:
-                    self.destination_cur.execute('set sql_log_bin=0;')  # 设置binlog参数
-                self.destination_cur.execute('SET SESSION wait_timeout = 2147483;')
-                self.__set_mark()
-                return True
-            except:
-                Logging(msg=traceback.format_exc(), level='error')
-            time.sleep(1)
-        else:
-            Logging(msg='try 60 times to fail for conncetion destination db,exist now', level='error')
-            sys.exit()
-
-    def __check_stat(self, state):
-        if state:
-            pass
+            if only_state:
+                return
         else:
             Logging(msg='failed!!!!', level='error')
+            if self.error_queue:
+                self.error_queue.put(1)
             sys.exit()
 
     def __enter__(self):
         '''
-        循环获取队列数据并执行
+        循环获取队列数据
         :return:
         '''
+        #目标库并发线程初始化
+        for i in range(10):
+            p = ThreadDump(**dict(self.kwargs,**{'thread_id':i+1}))
+            if p:
+                p.start()
+                self.th_list.append(p)
+            else:
+                sys.exit()
+
+        #状态库线程初始化
+        p = ThreadDump(**{'server_id':self.server_id,'save_status':self._status_conn})
+        p.start()
+        self.th_list.append(p)
+
+
+        group_sql = {}
+        num = 0
+        interval = int(time.time())
+
         while 1:
-            print(self.queue.qsize())
             if not self.queue.empty():
                 trancaction = self.queue.get()
+                #print(trancaction)
                 sql_list = trancaction['sql_list']
-                if sql_list:
-                    for sql in sql_list:
-                        self.trancaction_list.append([sql[0], sql[1]])
-                        self.__check_stat(self.__raise_sql(sql=sql[0], args=sql[1]))
-                    self.__save_status(binlog_file_name=trancaction['binlog'], at_pos=trancaction['at_pos'],
-                                       next_pos=trancaction['next_pos'], save_gtid_value=trancaction['gtid'],
-                                       _apply_conn=self.destination_conn, gno_uid=trancaction['gno_uid'])
-                else:
-                    self.__save_status(binlog_file_name=trancaction['binlog'], at_pos=trancaction['at_pos'],
-                                       next_pos=trancaction['next_pos'], save_gtid_value=trancaction['gtid'],
-                                       _apply_conn=None, gno_uid=trancaction['gno_uid'])
-                self.trancaction_list = []
+
+                for sql_value in sql_list:
+                    db_name,tbl_name = sql_value[1],sql_value[2]
+                    if '{}:{}'.format(db_name,tbl_name) in group_sql:
+                        group_sql['{}:{}'.format(db_name,tbl_name)].append({'gtid':trancaction['gtid'],
+                                                                       'gno_uid':trancaction['gno_uid'],
+                                                                       'gno_id':trancaction['gno_id'],
+                                                                       'binlog':trancaction['binlog'],
+                                                                       'at_pos':trancaction['at_pos'],
+                                                                       'next_pos':trancaction['next_pos'],
+                                                                       'sql_list':sql_value}
+                        )
+                    else:
+                        group_sql['{}:{}'.format(db_name, tbl_name)]=[{'gtid':trancaction['gtid'],
+                                                                       'gno_uid':trancaction['gno_uid'],
+                                                                       'gno_id':trancaction['gno_id'],
+                                                                       'binlog':trancaction['binlog'],
+                                                                       'at_pos':trancaction['at_pos'],
+                                                                       'next_pos':trancaction['next_pos'],
+                                                                       'sql_list':sql_value}
+                        ]
+
+                '''100个事务或者10s提交一次到并发序列'''
+                num += 1
+                if (num >= 100 or (int(time.time()) - interval) >= 10):
+                    if error_queue.empty():
+                        tmp_status = {'binlog':trancaction['binlog'],'at_pos':trancaction['at_pos'],
+                                      'next_pos':trancaction['next_pos'],'gtid':trancaction['gtid'],
+                                      'gno_uid':trancaction['gno_uid']}
+                        self.__check_stat(self.__put_queue(value=group_sql,tmp_status=tmp_status),only_state=True)
+
+                    else:
+                        for th in self.th_list:
+                            th.isDaemon()
+                        Logging(msg='an exception occurred in the inbound thread on destination db...',level='error')
+                        sys.exit()
+                    interval = int(time.time())
+                    num = 0
+                    group_sql = {}
                 continue
             else:
-                time.sleep(1)
+                time.sleep(0.001)
+
+    def __put_queue(self,value,tmp_status={}):
+        '''
+        先检测并发队列是否已满，超时时间为60秒，如果超过60秒检测时间都为full
+        表示线程已崩，防止在此进入死循环而无法检测目标库线程是否已停止
+        :param value:
+        :return:
+        '''
+        for i in range(60):
+            if self.__check_queue():
+                _uuid = int(uuid.uuid1())
+                chunk_list_status.append([_uuid, len(value), tmp_status])
+                chunk_list_status_th[_uuid] = []
+                for i in value:
+                    des_queue.put([i,value[i],_uuid])
+                return True
+            time.sleep(1)
+        else:
+            return False
+
+    def __check_queue(self):
+        '''
+        检查所有队列是否有满的,如果有一个满的表示可能阻塞了
+        二是为了防止某一个表落后很多
+        :return:
+        '''
+        if des_queue.full():
+            return False
+        return True
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.destination_cur.close()
         self.destination_conn.close()
+
+class ThreadDump(threading.Thread):
+    def __init__(self,**kwargs):
+        threading.Thread.__init__(self)
+        self.kwargs = kwargs
+
+    def run(self):
+        '''
+        启动监听或者服务线程
+        :return:
+        '''
+        global thread_lock, thread_lock_queue, chunk_list_status_th,chunk_list_status
+        if 'save_status' in self.kwargs:
+            with save_status(_status_conn=self.kwargs['save_status'],server_id=self.kwargs['server_id'],chunk_list_status=chunk_list_status,chunk_list_status_th=chunk_list_status_th):
+                pass
+        else:
+            with desthread(**dict(self.kwargs,**{'thread_lock':thread_lock,'thread_lock_queue':thread_lock_queue,
+                                                 'chunk_list_status_th':chunk_list_status_th})):
+                pass
+
+
+class save_status:
+    def __init__(self,_status_conn,server_id,chunk_list_status,chunk_list_status_th):
+        '''
+        状态保存.....
+        :param _status_conn:
+        :param server_id:
+        :param chunk_list_status:
+        :param chunk_list_status_th:
+        '''
+        self._status_conn = _status_conn
+        self.server_id = server_id
+        self.chunk_list_status = chunk_list_status
+        self.chunk_list_status_th = chunk_list_status_th
+    def __enter__(self):
+        while 1:
+            if self.chunk_list_status:
+                _chunk_uuid = self.chunk_list_status[0][0]
+                _chunk_length = self.chunk_list_status[0][1]
+                _chunk_status = self.chunk_list_status[0][2]
+                while 1:
+                    if len(self.chunk_list_status_th[_chunk_uuid]) == _chunk_length:
+                        state = self._status_conn.SaveStatus(logname=_chunk_status['binlog'],
+                                                at_pos=_chunk_status['at_pos'],
+                                                server_id=self.server_id,
+                                                next_pos=_chunk_status['next_pos'],
+                                                gtid=_chunk_status['gtid'],
+                                                gno_uid=_chunk_status['gno_uid'],
+                                                apply_conn=None)
+                        if state:
+                            chunk_list_status.pop(0)
+                            del chunk_list_status_th[_chunk_uuid]
+                            break
+                        else:
+                            sys.exit()
+                    time.sleep(0.001)
+            time.sleep(0.001)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
