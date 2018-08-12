@@ -79,7 +79,11 @@ class desthread(escape):
         :param args:
         :return:
         '''
-        args = self.escape_string(args) if args else []
+        try:
+            args = self.escape_string(args) if args else []
+        except:
+            Logging(msg=traceback.format_exc(),level='error')
+            self.error_queue.put(1)
         try:
             if sql == 'commit':
                 self.destination_conn.commit()
@@ -99,6 +103,7 @@ class desthread(escape):
             return None
 
         except:
+            Logging(msg='sql:{},values:{}'.format(sql, args), level='error')
             Logging(msg=traceback.format_exc(), level='error')
             return None
         return True
@@ -162,9 +167,8 @@ class desthread(escape):
             if only_state:
                 return
         else:
-            Logging(msg='failed!!!!', level='error')
-            if self.error_queue:
-                self.error_queue.put(1)
+            Logging(msg='desthread failed!!!!', level='error')
+            self.error_queue.put(1)
             sys.exit()
 
     def __check_queue(self):

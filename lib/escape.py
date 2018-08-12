@@ -39,7 +39,7 @@ class escape:
                 elif type(value[v]) is bytes:
                     _value[self.__escape_bytes(v)] = value[v].decode()
                 else:
-                    _value[v] = value[v]
+                    _value[self.__escape_bytes(v)] = value[v]
         elif type(value) is list:
             _value = []
             for v in value:

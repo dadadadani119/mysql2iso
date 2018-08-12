@@ -198,14 +198,21 @@ class OperationDB(escape):
                     _values = _parse_event.GetValue(type_code=event_code, event_length=event_length,
                                         cloums_type_id_list=tmepdata.cloums_type_id_list,
                                         metadata_dict=tmepdata.metadata_dict,
-                                        unsigned_list=tmepdata.table_struct_type_list[table_struce_key])
+                                        unsigned_list=self.__check_struce(table_struce_key))
                     self.GetSQL(_values=_values, event_code=event_code)
             else:
                 _values = _parse_event.GetValue(type_code=event_code, event_length=event_length,
                                                 cloums_type_id_list=tmepdata.cloums_type_id_list,
                                                 metadata_dict=tmepdata.metadata_dict,
-                                                unsigned_list=tmepdata.table_struct_type_list[table_struce_key])
+                                                unsigned_list=self.__check_struce(table_struce_key))
                 self.GetSQL(_values=_values, event_code=event_code)
+
+    def __check_struce(self,table_struce_key):
+        if table_struce_key in tmepdata.table_struct_type_list:
+            return tmepdata.table_struct_type_list[table_struce_key]
+        else:
+            Logging(msg='this struce name {} not in table_struct_type_list'.format(table_struce_key),level='error')
+            sys.exit()
 
     def Operation(self):
         '''
@@ -382,7 +389,7 @@ class OperationDB(escape):
                         self.repl_mark = None
                         continue
                     else:
-                        Logging(msg='thre binlog queue is full !!!!!',level='error')
+                        Logging(msg='the binlog queue is full !!!!!',level='error')
                         sys.exit()
 
         else:

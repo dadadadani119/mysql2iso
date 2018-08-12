@@ -110,15 +110,17 @@ class Prepare(object):
         :param tables:
         :return:
         '''
-        cur.execute('select {} from {}.{} group by {} order by {}'.format(index_name,databases,tables,index_name,index_name))
+        #cur.execute('select {} from {}.{} group by {} order by {}'.format(index_name,databases,tables,index_name,index_name))
+        cur.execute('select count(*) as count  from {}.{} '.format(databases, tables))
         result = cur.fetchall()
-        total_rows = len(result)
-        result_value = [row[index_name] for row in result]
+        total_rows = result[0]['count']
+        #result_value = [row[index_name] for row in result]
         #result_value = list(set(result_value))
         if total_rows == 0:
             return  None,None
         if total_rows < len(self.thread_list):
-            return [[result_value[0],result_value[-1]]],None
+            max_min = self.get_max_min(cur=cur,databases=databases,tables=tables,index_name=index_name)
+            return [max_min],None
 
         chunk = int(total_rows/(len(self.thread_list)))
         '''记录每个分块索引字段最大最小值'''
@@ -127,11 +129,11 @@ class Prepare(object):
         '''_tmp记录每个块的最大值，由于可能存在重复值，所以在下一个块计算时会进行比较'''
         for i in range(len(self.thread_list)):
             if i == len(self.thread_list) - 1:
-                a = result_value[start:]
+                max_min = self.__get_chunk_min_max(cur,databases,tables,index_name,start)
             else:
-                a = result_value[start:start+chunk]
-            chunks_list.append(self.__split_data(a))
-            start += chunk
+                max_min = self.__get_chunk_min_max(cur, databases, tables, index_name, start,chunk)
+            chunks_list.append(max_min)
+            start = max_min[1]
         return chunks_list,True
 
     def __split_data(self,data_list):
@@ -161,6 +163,22 @@ class Prepare(object):
 
     def get_max_min(self,cur,databases,tables,index_name):
         cur.execute('select min({}) as min,max({}) as max from {}.{}'.format(index_name, index_name, databases, tables))
+        re_min_max = cur.fetchall()
+        if re_min_max:
+            min = re_min_max[0]['min']
+            max = re_min_max[0]['max']
+            return [min, max]
+        else:
+            return None
+
+    def __get_chunk_min_max(self,cur,databases,tables,index_name,start=0,chunk=None):
+        if chunk:
+            sql = 'select min({}) as min,max({}) as max from (select {} from {}.{} where {} > %s ' \
+                  'limit {}) a'.format(index_name, index_name, index_name, databases, tables, index_name,chunk)
+        else:
+            sql = 'select min({}) as min,max({}) as max from (select {} from {}.{} where {} > %s ' \
+                  ') a'.format(index_name,index_name,index_name,databases,tables,index_name)
+        cur.execute(sql,start)
         re_min_max = cur.fetchall()
         if re_min_max:
             min = re_min_max[0]['min']

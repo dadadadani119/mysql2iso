@@ -50,56 +50,56 @@ class Dump:
 
 
     def dump_to_new_db(self,database,tablename,idx,pri_idx,chunk_list=None,bytes_col_list=None):
-        for list in chunk_list:
-            start_num = list[0]
-            end_num = list[1]
-            limit_num = 0
-            while True:
-                '''
-                第一次使用分块大小limit N,M, N代表起始个数位置（chunks大小），M代表条数
-                第一次执行之后获取最大主键或唯一索引值范围查找
-                每个线程查询一次累加条数当剩余条数小于1000时调用__get_from_source_db_list
-                每个chunk剩余条数大于1000固定调用__get_from_source_db_limit1000
-                '''
-                sql = 'SELECT * FROM {}.{} WHERE {}>=%s and {}<=%s ORDER BY {} LIMIT {},%s'.format(database, tablename,
-                                                                                                   idx, idx, idx, limit_num)
-                self.__get_from_source_db_limit2000(sql=sql, args_value=[start_num, end_num])
-                '''======================================================================================================'''
+        #for list in chunk_list:
+        start_num = chunk_list[0]
+        end_num = chunk_list[1]
+        limit_num = 0
+        while True:
+            '''
+            第一次使用分块大小limit N,M, N代表起始个数位置（chunks大小），M代表条数
+            第一次执行之后获取最大主键或唯一索引值范围查找
+            每个线程查询一次累加条数当剩余条数小于1000时调用__get_from_source_db_list
+            每个chunk剩余条数大于1000固定调用__get_from_source_db_limit1000
+            '''
+            sql = 'SELECT * FROM {}.{} WHERE {}>=%s and {}<=%s ORDER BY {} LIMIT {},%s'.format(database, tablename,
+                                                                                               idx, idx, idx, limit_num)
+            self.__get_from_source_db_limit2000(sql=sql, args_value=[start_num, end_num])
+            '''======================================================================================================'''
 
-                '''
-                拼接行数据为pymysql格式化列表
-                如果返回数据为空直接退出
-                '''
-                all_value = []
-                if self.result:
-                    _len = len(self.result[0])
-                    _num = len(self.result)
-                    for row in self.result:
-                        all_value += row.values()
-                else:
-                    #Logging(msg='return value is empty',level='warning')
-                    break
+            '''
+            拼接行数据为pymysql格式化列表
+            如果返回数据为空直接退出
+            '''
+            all_value = []
+            if self.result:
+                _len = len(self.result[0])
+                _num = len(self.result)
+                for row in self.result:
+                    all_value += row.values()
+            else:
+                #Logging(msg='return value is empty',level='warning')
+                break
 
-                sql = 'INSERT INTO {}.{} VALUES{}'.format(database,tablename,self.__combination_value_format(_len=_len,_num=_num))
+            sql = 'INSERT INTO {}.{} VALUES{}'.format(database,tablename,self.__combination_value_format(_len=_len,_num=_num))
 
-                try:
-                    self.des_mysql_cur.execute(sql,all_value)
-                    self.des_mysql_conn.commit()
-                except pymysql.Warning:
-                    Logging(msg=traceback.format_list(),level='warning')
-                except pymysql.Error:
-                    Logging(msg=traceback.format_list(),level='error')
-                    self.__retry_(sql,all_value)
+            try:
+                self.des_mysql_cur.execute(sql,all_value)
+                self.des_mysql_conn.commit()
+            except pymysql.Warning:
+                Logging(msg=traceback.format_list(),level='warning')
+            except pymysql.Error:
+                Logging(msg=traceback.format_list(),level='error')
+                self.__retry_(sql,all_value)
 
-                '''
-                每次循环结束计算该线程还剩未处理的条数（limit_num）
-                当返回条数少于1000条时将退出整个循环
-                '''
-                return_len = len(self.result)
-                limit_num += return_len
-                if return_len < 2000:
-                    break
-                '''=========================================='''
+            '''
+            每次循环结束计算该线程还剩未处理的条数（limit_num）
+            当返回条数少于1000条时将退出整个循环
+            '''
+            return_len = len(self.result)
+            limit_num += return_len
+            if return_len < 2000:
+                break
+            '''=========================================='''
 
     def __join_pri_where(self,pri_key_info):
         '''
