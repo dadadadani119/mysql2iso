@@ -59,4 +59,15 @@ ErrorCode = {
     2003:   True,   #Can't connect to MySQL server on '10.3.10.11' ([Errno 111] Connection refused)
     1213:   True,   #eadlock found when trying to get lock; try restarting transaction
     2006:   True,   #MySQL server has gone away (ConnectionResetError(104, 'Connection reset by peer'))
-    }
+    1203:   True,   #service unavailable
+    1105:   True,   #'(proxy) unable to continue processing command'
+
+}
+
+RetryErrorCode = {
+    1205:   True,   #Lock wait timeout exceeded; try restarting transaction
+    1412:   True,   #Table definition has changed, please retry transaction
+}
+
+
+

@@ -8,6 +8,7 @@
 
 import sys,pymysql,traceback,time
 from .ErrorCode import ErrorCode
+from lib.ErrorCode import RetryErrorCode
 from .Loging import Logging
 from .InitDB import InitMyDB
 from .escape import escape
@@ -91,7 +92,10 @@ class desthread(escape):
                 self.destination_cur.execute(sql, args)
         except pymysql.Error as e:
             Logging(msg=traceback.format_exc(), level='error')
-            if e.args[0] in ErrorCode:
+            if e.args[0] in RetryErrorCode:
+                Logging(msg='sql: {}  args:{}'.format(sql,args),level='error')
+                self.__raise_sql(sql=sql,args=args,retry=retry,type=type)
+            elif e.args[0] in ErrorCode:
                 if ErrorCode[e.args[0]]:
                     if sql == 'commit':
                         self.__retry_execute(retry=retry)
