@@ -50,7 +50,6 @@ def start(conf_name):
     return _argv
 
 
-
 if __name__ == "__main__":
     init()
 

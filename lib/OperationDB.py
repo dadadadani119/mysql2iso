@@ -33,9 +33,16 @@ class tmepdata:
 class OperationDB(escape):
     def __init__(self,**kwargs):
         super(OperationDB,self).__init__()
+        self.destnation_type = kwargs['destnation_type']
+        self.jar = kwargs['jar']
+        self.jar_conf = kwargs['jar_conf']
+
+        self.map_conf = kwargs['map_conf']
+        self.queal_struct = kwargs['queal_struct']
         self.ssl_auth = {'cert':kwargs['cert'],'key':kwargs['key']} if kwargs['ssl'] else None
         self.daemon = kwargs['daemon']
         self.queue = kwargs['queue']
+        self.lookback = kwargs['lookback']
         #print('op: {}'.format(self.queue))
         self.full_dump = kwargs['full_dump']                                                                                                        #是否全量导出
         self.threads = kwargs['threads']                                                                                                            #全量导出时并发线程
@@ -88,24 +95,18 @@ class OperationDB(escape):
         :return:
         '''
         for i in range(60):
-            self.destination_conn = InitMyDB(mysql_host=self.dhost, mysql_port=self.dport, mysql_user=self.duser,
-                                             mysql_password=self.dpasswd,auto_commit=False).Init()
+            self.conn = InitMyDB(mysql_host=self.host, mysql_port=self.port, mysql_user=self.user,
+                                 mysql_password=self.passwd, unix_socket=self.unix_socket, ssl=self.ssl_auth).Init()
 
             try:
-                self.destination_cur = self.destination_conn.cursor()
-
-                if self.binlog is None:
-                    self.destination_cur.execute('set sql_log_bin=0;')  # 设置binlog参数
-                self.destination_cur.execute('SET SESSION wait_timeout = 2147483;')
-
-                self.conn = InitMyDB(mysql_host=self.host, mysql_port=self.port, mysql_user=self.user,
-                                     mysql_password=self.passwd, unix_socket=self.unix_socket, ssl=self.ssl_auth).Init()
+                self.cur = self.conn.cursor()
+                self.cur.execute('SET SESSION wait_timeout = 2147483;')
                 return
             except pymysql.Error as e:
                 Logging(msg=e.args,level='error')
             time.sleep(1)
         else:
-            Logging(msg='destination db connection failed !!!',level='error')
+            Logging(msg='source db connection failed !!!',level='error')
             sys.exit()
 
     def __init_status_conn(self):
@@ -113,75 +114,6 @@ class OperationDB(escape):
         self._status_conn = GetStruct(host=self.shost, port=self.sport, user=self.suser, passwd=self.spassword,
                                       binlog=self.sbinlog)  # 状态库链接类初始化
         self._status_conn.CreateTmp()
-
-    def WhereJoin(self,table_struce_key):
-        return ' AND '.join(['`{}`=%s'.format(col) for col in tmepdata.table_struct_list[table_struce_key]])
-
-    def SetJoin(self,table_struce_key):
-        return ','.join(['`{}`=%s'.format(col) for col in tmepdata.table_struct_list[table_struce_key]])
-
-    def ValueJoin(self,table_struce_key):
-        return '({})'.format(','.join(['%s' for i in range(len(tmepdata.table_struct_list[table_struce_key]))]))
-
-    def PkJoin(self,pk_list,table_struce_key):
-        pk_col = []
-        for pk in pk_list:
-            pk_col.append(tmepdata.table_struct_list[table_struce_key][pk])
-        if len(pk_col) > 1:
-            return ' AND '.join(['`{}`=%s'.format(col) for col in pk_col])
-        else:
-            return '`{}`=%s'.format(pk_col[0])
-
-    def GetSQL(self,_values=None,event_code=None):
-        table_struce_key = '{}:{}'.format(tmepdata.database_name,tmepdata.table_name)
-
-        if tmepdata.table_pk_idex_list[table_struce_key]:
-            '''获取主键所在index'''
-            __pk_idx = tmepdata.table_pk_idex_list[table_struce_key]
-            pk_where = self.PkJoin(__pk_idx,table_struce_key)
-        else:
-            __pk_idx = None
-
-        _tmp_sql_list = []
-        if event_code == binlog_events.UPDATE_ROWS_EVENT:
-            __values = [_values[i:i + 2] for i in range(0, len(_values), 2)]
-            for row_value in __values:
-                if __pk_idx is not None:
-                    cur_sql = 'UPDATE {}.{} SET {} WHERE {}'.format(tmepdata.database_name, tmepdata.table_name,
-                                                                       self.SetJoin(table_struce_key), pk_where)
-                    pk_values = []
-                    for i in __pk_idx:
-                        pk_values.append(row_value[0][i])
-                    _args = row_value[1] + pk_values
-                else:
-                    cur_sql = 'UPDATE {}.{} SET {} WHERE {}'.format(tmepdata.database_name, tmepdata.table_name,
-                                                                   self.SetJoin(table_struce_key),
-                                                                   self.WhereJoin(table_struce_key))
-                    _args = row_value[1] + row_value[0]
-                _tmp_sql_list.append([cur_sql,_args])
-
-        else:
-            if event_code == binlog_events.WRITE_ROWS_EVENT:
-                values_str = ','.join([self.ValueJoin(table_struce_key) for i in range(len(_values))])
-                cur_sql = 'INSERT INTO {}.{} VALUES{};'.format(tmepdata.database_name, tmepdata.table_name,
-                                                                   values_str)
-                all_values = []
-                for value in _values:
-                    all_values += value
-                _tmp_sql_list.append([cur_sql,all_values])
-            elif event_code == binlog_events.DELETE_ROWS_EVENT:
-                for value in _values:
-                    if __pk_idx is not None:
-                        cur_sql = 'DELETE FROM {}.{} WHERE {};'.format(tmepdata.database_name,tmepdata.table_name,pk_where)
-                        pk_values = []
-                        for i in __pk_idx:
-                            pk_values.append(value[i])
-                        _args = pk_values
-                    else:
-                        cur_sql = 'DELETE FROM {}.{} WHERE {};'.format(tmepdata.database_name,tmepdata.table_name,self.WhereJoin(table_struce_key))
-                        _args = value
-                    _tmp_sql_list.append([cur_sql,_args])
-        tmepdata.sql_list.append([_tmp_sql_list, tmepdata.database_name, tmepdata.table_name, self.at_pos])
 
     def __execute_code(self,_parse_event,event_code,event_length,table_struce_key):
         '''
@@ -199,13 +131,13 @@ class OperationDB(escape):
                                         cloums_type_id_list=tmepdata.cloums_type_id_list,
                                         metadata_dict=tmepdata.metadata_dict,
                                         unsigned_list=self.__check_struce(table_struce_key))
-                    self.GetSQL(_values=_values, event_code=event_code)
+                    tmepdata.sql_list.append([_values,tmepdata.database_name,tmepdata.table_name,self.at_pos,event_code])
             else:
                 _values = _parse_event.GetValue(type_code=event_code, event_length=event_length,
                                                 cloums_type_id_list=tmepdata.cloums_type_id_list,
                                                 metadata_dict=tmepdata.metadata_dict,
                                                 unsigned_list=self.__check_struce(table_struce_key))
-                self.GetSQL(_values=_values, event_code=event_code)
+                tmepdata.sql_list.append([_values, tmepdata.database_name, tmepdata.table_name, self.at_pos,event_code])
 
     def __check_struce(self,table_struce_key):
         if table_struce_key in tmepdata.table_struct_type_list:
@@ -228,7 +160,10 @@ class OperationDB(escape):
             src_mysql_info = {'mysql_host':self.host,'mysql_port':self.port,'mysql_user':self.user,
                               'mysql_password':self.passwd,'unix_socket':self.unix_socket,'ssl':self.ssl_auth}
             _binlog_file,_binlog_pos,_excute_gtid = processdump(threads=self.threads,dbs=self.databases,tables=self.tables,
-                                                   src_kwargs=src_mysql_info,des_kwargs=des_mysql_info,binlog=self.binlog).start()
+                                                   src_kwargs=src_mysql_info,des_kwargs=des_mysql_info,binlog=self.binlog,
+                                                                map_conf=self.map_conf,queal_struct=self.queal_struct,
+                                                                destination_type=self.destnation_type,jar=self.jar,
+                                                                jar_conf=self.jar_conf).start()
             if _binlog_file is None or _binlog_pos is None:
                 sys.exit()
         '''============================================================================================================'''
@@ -238,6 +173,9 @@ class OperationDB(escape):
         如有全量导出使用导出开始时记录的binlog信息，不然使用传入参数的值
         '''
         self.__init_master_slave_conn()  # 初始化源库、目标库同步链接
+        self.__get_all_table_struct()
+        # self.cur.close()
+        self.queue.put({'table_struct': [tmepdata.table_struct_list, tmepdata.table_pk_idex_list]})
 
         if self.daemon:
             self.__init_status_conn()  # 初始化状态库
@@ -248,6 +186,7 @@ class OperationDB(escape):
 
 
         if self.daemon or self.full_dump:
+            self.cur.close()
             rep_info = {'log_file': _binlog_file, 'log_pos': _binlog_pos, 'mysql_connection': self.conn,
                         'server_id': self.server_id, 'auto_position': self.auto_position, 'gtid': _excute_gtid}
             Logging(msg='binlog: {} position: {} gtid : {}'.format(_binlog_file, _binlog_pos, _excute_gtid),
@@ -258,6 +197,8 @@ class OperationDB(escape):
 
             ReplConn = ReplicationMysql(**rep_info).ReadPack()
         else:
+            self.__check_repl_info()
+            self.cur.close()
             rep_info = {'log_file': self.binlog_file, 'log_pos': self.start_position, 'mysql_connection': self.conn,
                         'server_id': self.server_id, 'auto_position': self.auto_position, 'gtid': self.gtid}
             Logging(msg='binlog: {} position: {} gtid : {}'.format(self.binlog_file, self.start_position, self.gtid),
@@ -285,9 +226,6 @@ class OperationDB(escape):
             table_map_event: 获取数据库名、表明、字段信息
             gtid_log_event、rotate_event、query_event：获取binlog基本信息记录与dump2db中
             '''
-            self.__get_all_table_struct()
-            self.destination_cur.close()
-            self.destination_conn.close()
 
             while 1:
                 self.at_pos = next_pos
@@ -311,9 +249,10 @@ class OperationDB(escape):
                     '''
                     对过滤的thread_id，type进行判断
                     '''
-                    if self.repl_mark:
-                        pass
-                    elif self.repl_mark_status:
+                    if self.lookback:
+                        if self.repl_mark:
+                            continue
+                    if self.repl_mark_status:
                         if self.ithread:
                             if self.ithread == tmepdata.thread_id:
                                 continue
@@ -378,7 +317,7 @@ class OperationDB(escape):
 
                     tracaction_value = {'gtid':save_gtid_value,'gno_uid':self.gno_uid,'gno_id':self.gno_id,
                                         'binlog':binlog_file_name,'at_pos':self.at_pos,'next_pos':next_pos,
-                                        'sql_list':tmepdata.sql_list}
+                                        'value_list':tmepdata.sql_list}
                     append_state = self.append_data(values=tracaction_value)
                     if append_state:
                         tmepdata.excute_gtid = _gtid.copy() if _gtid else  None
@@ -415,7 +354,7 @@ class OperationDB(escape):
         sql = 'select TABLE_SCHEMA,TABLE_NAME from INFORMATION_SCHEMA.COLUMNS GROUP BY TABLE_SCHEMA,TABLE_NAME;'
         self.__check_stat(self.__raise_sql(sql=sql))
 
-        result = self.destination_cur.fetchall()
+        result = self.cur.fetchall()
         if result:
             for row in result:
                 table_schema = row['TABLE_SCHEMA']
@@ -431,8 +370,6 @@ class OperationDB(escape):
                         tmepdata.table_struct_type_list[table_struce_key] = self.__getcolumn(table_schema, table_name)
 
 
-
-
     def __getcolumn(self,*args):
         '''args顺序 database、tablename'''
         column_list = []
@@ -441,14 +378,31 @@ class OperationDB(escape):
         sql = 'select COLUMN_NAME,COLUMN_KEY,COLUMN_TYPE from INFORMATION_SCHEMA.COLUMNS where table_schema=%s and table_name=%s order by ORDINAL_POSITION;'
         self.__check_stat(self.__raise_sql(sql = sql,args=args))
 
-        result = self.destination_cur.fetchall()
+        result = self.cur.fetchall()
         pk_idex = []
         for idex,row in enumerate(result):
             column_list.append(row['COLUMN_NAME'])
             column_type_list.append(row['COLUMN_TYPE'])
+            # if row['COLUMN_NAME'] in ('user_id','msg_id'):
+            #     pk_idex.append(idex)
             if row['COLUMN_KEY'] == 'PRI':
                 pk_idex.append(idex)
         return column_list,pk_idex,column_type_list
+
+    def __check_repl_info(self):
+        '''
+        在没有提供任何同步所需的binlog参数情况下
+        获取当前位置进行同步
+        :return:
+        '''
+        if all([self.binlog_file,self.start_position,self.gtid]):
+            pass
+        else:
+            sql = 'show master status'
+            self.__check_stat(self.__raise_sql(sql=sql))
+            result = self.cur.fetchall()
+            _re = result[0]
+            self.binlog_file,self.start_position,self.gtid= _re['File'],_re['Position'],str(_re['Executed_Gtid_Set']).replace('\n','')
 
 
     def __gtid_set(self,gtid):
@@ -505,7 +459,7 @@ class OperationDB(escape):
         '''
         args = self.escape_string(args) if args else []
         try:
-            self.destination_cur.execute(sql, args)
+            self.cur.execute(sql,args)
         except pymysql.Error as e:
             Logging(msg='{}'.format(e.args), level='error')
             if e.args[0] in ErrorCode:
@@ -542,16 +496,18 @@ class OperationDB(escape):
         '''
         import time
         for i in range(60):
-            Logging(msg='connection to destination db try agian!!!', level='info')
+            Logging(msg='connection to source db try agian!!!', level='info')
             try:
-                self.destination_conn = InitMyDB(mysql_host=self.dhost, mysql_port=self.dport,
-                                                 mysql_user=self.duser,
-                                                 mysql_password=self.dpasswd, auto_commit=False).Init()
-                if self.destination_conn:
-                    self.destination_cur = self.destination_conn.cursor()
+                self.conn = InitMyDB(mysql_host=self.host, mysql_port=self.port,
+                                                 mysql_user=self.user,
+                                                 mysql_password=self.password,
+                                                 unix_socket=self.unix_socket,
+                                                 ssl=self.ssl_auth).Init()
+                if self.conn:
+                    self.cur = self.conn.cursor()
                     Logging(msg='connection success!!!', level='info')
                     try:
-                        self.destination_cur.execute('SET SESSION wait_timeout = 2147483;')
+                        self.cur.execute('SET SESSION wait_timeout = 2147483;')
                         return True
                     except pymysql.Error as e:
                         Logging(msg=e.args,level='error')
@@ -561,7 +517,7 @@ class OperationDB(escape):
                 Logging(msg=traceback.format_exc(), level='error')
             time.sleep(1)
         else:
-            Logging(msg='try 60 times to fail for conncetion destination db,exist now', level='error')
+            Logging(msg='try 60 times to fail for conncetion source db,exist now', level='error')
             sys.exit()
 
     def __check_stat(self, state):

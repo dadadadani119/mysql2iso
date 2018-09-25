@@ -56,3 +56,29 @@ class escape:
             return value.decode()
         else:
             return value
+
+    def escape_args(self,args):
+        if type(args) == list:
+            _args = []
+            for i in range(len(args)):
+                if type(args[i]) in (dict,list):
+                    _args.append("'{}'".format(json.dumps(args[i])))
+                elif type(args[i]) ==str:
+                    _args.append(self.escape_args(args[i]))
+                elif type(args[i]) == int:
+                    _args.append(args[i])
+                else:
+                    _args.append("'Null'")
+            return _args
+        elif type(args) ==str:
+            if args in ('null','Null'):
+                return "'Null'"
+            else:
+                if '\'' in args:
+                    return "'{}'".format(args.replace('\'', '\\\''))
+
+                return "'{}'".format(args)
+        elif type(args) == int:
+            return args
+        else:
+            return "'Null'"

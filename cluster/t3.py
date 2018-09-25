@@ -12,7 +12,6 @@
 其中r为所采取的基数，而m为堆数，在某些时候，基数排序法的效率高于其它的稳定性排序法。
 '''
 import numpy as np
-'''
 def RadixSort(a):
   n = 1                      #最小的位数置为1（包含0）
   max = np.max(a)            #得到带排序数组中最大数
@@ -22,9 +21,6 @@ def RadixSort(a):
     bucket = {}               #用字典构建桶
     for x in range(10):
       bucket.setdefault(x, [])  #将每个桶置空
-    print(bucket)
-    import time
-    time.sleep(10)
     for x in a:                #对每一位进行排序
       radix =(int(x / (10**i))) % 10  #得到每位的基数
       bucket[radix].append(x) #将对应的数组元素加入到相应位基数的桶中
@@ -45,22 +41,3 @@ if __name__ == '__main__':
   print("---------------------------------------------------------------")
   print(a)
   print("---------------------------------------------------------------")
-'''
-# coding=utf-8
-from kazoo.client import KazooClient
-import time,sys
-
-zk = KazooClient(hosts='192.168.212.52:2181')
-zk.start()
-
-
-@zk.DataWatch('/mysql2iso/test01')
-def my_func(data, stat, event):
-    if data is None:
-        print("Data is %s" % data)
-        sys.exit()
-
-
-while True:
-    time.sleep(10)
-    print('ok')

@@ -350,7 +350,6 @@ class ParseEvent(ReadPacket.Read):
                     elif _metadata == 2:
                         values.append(self.read_uint16())
                     bytes += _metadata
-
             #if type == Metadata.binlog_events.UPDATE_ROWS_EVENT:
             __values.append(values)
 

@@ -10,6 +10,12 @@ from .OperationDB import OperationDB
 
 class Entrance(Metadata.TableMetadata):
     def __init__(self,kargs):
+
+        self.destnation_type = kargs['destnation_type'] if 'destnation_type' in kargs else None
+        self.jar,self.jar_conf = kargs['jar'],kargs['jar_conf']
+        self.map_conf = kargs['map_conf']
+        self.queal_struct = kargs['queal_struct']
+
         self.queue = kargs['queue']
         self.binlog_file = kargs['binlog_file']
         self.start_position = kargs['start_position']
@@ -45,6 +51,7 @@ class Entrance(Metadata.TableMetadata):
 
         ''''''
         self.daemon = kargs['daemon']
+        self.lookback = kargs['lookback']
 
         '''状态存储库信息'''
         self.shost = kargs['shost']
@@ -60,7 +67,9 @@ class Entrance(Metadata.TableMetadata):
                     server_id=self.server_id,binlog=self.binlog,full_dump=self.full_dump,threads=self.threads,
                     ithread=self.ithread,gtid=self.gtid,auto_position=self.auto_position,ssl=self.ssl,cert=self.cert,
                     key=self.key,daemon=self.daemon,shost=self.shost,sport=self.sport,suser=self.suser,
-                    spassword=self.spassword,sbinlog=self.sbinlog,queue=self.queue).Operation()
+                    spassword=self.spassword,sbinlog=self.sbinlog,queue=self.queue,
+                    destnation_type=self.destnation_type,map_conf=self.map_conf,queal_struct=self.queal_struct,
+                    jar=self.jar,jar_conf=self.jar_conf,lookback=self.lookback).Operation()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass

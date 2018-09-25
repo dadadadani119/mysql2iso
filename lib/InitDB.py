@@ -11,7 +11,7 @@ from contextlib import closing
 
 class InitMyDB(object):
     def __init__(self,mysql_host=None,mysql_port=None,mysql_user=None,mysql_password=None,unix_socket=None,
-                 auto_commit=None,ssl=None):
+                 auto_commit=None,ssl=None,type=None):
         self.ssl = ssl
         self.auto_commit = auto_commit
         self.mysql_user = mysql_user
@@ -21,6 +21,7 @@ class InitMyDB(object):
         self.mysql_host = mysql_host
 
     def Init(self):
+
         try:
             connection = pymysql.connect(host=self.mysql_host,
                                               user=self.mysql_user,

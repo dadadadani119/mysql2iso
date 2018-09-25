@@ -8,14 +8,19 @@ import sys
 sys.path.append("..")
 from lib.InitDB import InitMyDB
 from lib.Loging import Logging
+from mode.phoenix.InitDB import InitDB as InitPhoenixDB
 
 class Prepare(object):
-    def __init__(self,threads,src_kwargs,des_kwargs):
+    def __init__(self,threads,src_kwargs,des_kwargs,jar=None,jar_conf=None,destination_type=None):
         self.threads = threads
         self.db_conn_info = src_kwargs      #连接数据需要的基本信息
         self.des_conn_info = des_kwargs
         self.thread_list = []           #连接列表
         self.des_thread_list = []       #目标库链接列表
+        self.jar = jar
+        self.jar_conf = jar_conf
+        self.destination_type = destination_type
+
     def init_conn(self,primary_t=None):
         '''
         初始化数据库链接，所有链接添加到链接列表
@@ -56,16 +61,26 @@ class Prepare(object):
         :return:
         '''
         for i in range(self.threads-1):
-            conn = InitMyDB(**self.des_conn_info).Init()
-            if conn:
-                try:
-                    cur = conn.cursor()
-                    if binlog is None:
-                        cur.execute('set sql_log_bin=0;')
-                    cur.execute('SET SESSION wait_timeout = 2147483;')
-                    self.des_thread_list.append({'conn': conn, 'cur': cur})
-                except:
-                    Logging(msg=traceback.format_exc(), level='error')
+            if self.destination_type == 'phoenix':
+                conn = InitPhoenixDB(host=self.des_conn_info['mysql_host'],port=self.des_conn_info['mysql_port'],
+                                     user=self.des_conn_info['mysql_user'],passwd=self.des_conn_info['mysql_password'],
+                                     jar=self.jar,jar_conf=self.jar_conf).Init()
+                if conn:
+                    try:
+                        cur = conn.cursor()
+                    except:
+                        Logging(msg=traceback.format_exc(), level='error')
+            else:
+                conn = InitMyDB(**self.des_conn_info).Init()
+                if conn:
+                    try:
+                        cur = conn.cursor()
+                        if binlog is None:
+                            cur.execute('set sql_log_bin=0;')
+                        cur.execute('SET SESSION wait_timeout = 2147483;')
+                    except:
+                        Logging(msg=traceback.format_exc(), level='error')
+            self.des_thread_list.append({'conn': conn, 'cur': cur})
 
     def master_info(self,cur):
         '''
@@ -132,31 +147,35 @@ class Prepare(object):
                 max_min = self.__get_chunk_min_max(cur,databases,tables,index_name,start)
             else:
                 max_min = self.__get_chunk_min_max(cur, databases, tables, index_name, start,chunk)
-            chunks_list.append(max_min)
+            _max_min_list = self.__split_data(cur,max_min,index_name,databases,tables)
+            chunks_list.append(_max_min_list)
             start = max_min[1]
         return chunks_list,True
 
-    def __split_data(self,data_list):
+    def __split_data(self,cur,max_min,index_name,database,tables):
         '''
         按10000一个区间拆分每个线程执行的数据
         :param data_list:
         :return:
         '''
-        _l = len(data_list)
+        _min,_max = max_min[0],max_min[1]
+        cur.execute('select count(*) as count  from {}.{}  where {} >= %s and {} <= %s'.format(
+            database,tables,index_name,index_name),max_min)
+        result = cur.fetchall()
+        total_rows = result[0]['count']
         _tmp = []
-        if _l > 10000:
-            _n = int(_l/10000)
-            _t = 0
+        if total_rows > 10000:
+            _n = int(total_rows/10000)
+            _t = _min - 1
             for v in range(_n):
-                if v == (_n-1):
-                    _all = data_list[_t:]
-                    _tmp.append([_all[0],_all[-1]])
+                if v == _n -1:
+                    _min_max = self.__get_chunk_min_max(cur,database,tables,index_name,start=_t,end=_max)
                 else:
-                    _all = data_list[_t:_t+10000]
-                    _tmp.append([_all[0],_all[-1]])
-                _t += 10000
+                    _min_max = self.__get_chunk_min_max(cur,database,tables,index_name,start=_t,chunk=10000)
+                    _t = _min_max[1]
+                _tmp.append(_min_max)
         else:
-            _tmp.append([data_list[0],data_list[-1]])
+            _tmp.append(max_min)
         return _tmp
 
 
@@ -171,14 +190,21 @@ class Prepare(object):
         else:
             return None
 
-    def __get_chunk_min_max(self,cur,databases,tables,index_name,start=0,chunk=None):
+    def __get_chunk_min_max(self,cur,databases,tables,index_name,start=0,chunk=None,end=None):
         if chunk:
-            sql = 'select min({}) as min,max({}) as max from (select {} from {}.{} where {} > %s ' \
-                  'limit {}) a'.format(index_name, index_name, index_name, databases, tables, index_name,chunk)
+            sql = 'select min({}) as min,max({}) as max from (select {} from {}.{} where {} > %s  order by {} ' \
+              'limit {}) a'.format(index_name, index_name, index_name, databases, tables, index_name,index_name,chunk)
+        elif end:
+            sql = 'select min({}) as min,max({}) as max from (select {} from {}.{} where {} > %s and {} <= %s  ' \
+                  'order by {})a'.format(index_name, index_name, index_name, databases, tables, index_name,
+                                         index_name, index_name)
         else:
             sql = 'select min({}) as min,max({}) as max from (select {} from {}.{} where {} > %s ' \
                   ') a'.format(index_name,index_name,index_name,databases,tables,index_name)
-        cur.execute(sql,start)
+        if end:
+            cur.execute(sql, [start,end])
+        else:
+            cur.execute(sql,start)
         re_min_max = cur.fetchall()
         if re_min_max:
             min = re_min_max[0]['min']

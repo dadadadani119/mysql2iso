@@ -9,6 +9,7 @@
     4、支持集群模式，可选基于zookeeper或leader选举模式(开发中)
     5、多节点/区域同步支持回环控制
     6、基于库、表为单位并发入库
+    7、可用于mysql之间的同构/异构，以及mysql到phonix的同构/异构数据同步
 
 ##使用参考：
     1、首先从github获取到程序
@@ -53,20 +54,26 @@
             的模式
             gtid: gtid模式需要设置的gtid值
         destination：
+            dthreads: 并发入库线程数，默认为单线程
             dhost： 目标库IP地址
             dport： 目标库端口
             duser/dpassword： 目标库用户名密码
             binlog： 是否记录binlog,可配置True/False，默认为False，在链接创建时将设置sql_log_bin=0
+            jar: 目标库为phoenix时指定链接用的jar包
+            jar_conf： 链接phoenix时需配置的参数
         status：同步状态保存配置项（mysql）
             shost： 状态库IP地址
             sport： 状态库端口
             suser/spassword： 状态库账号密码，需要创建库、表权限
             binlog: 是否记录binlog,可配置True/False，默认为False，在链接创建时将设置sql_log_bin=0
+    异构map:
+        source_db:
+            配置库名对应异构情况，见map_example
 
 ##实现原理：
     1、binlog追加实现：
         通过pymysql模块socke方式注册slave端，单线程从master获取每个packet并通过解析获取sql语句放入队列，消费线程从队列获取sql
-        并按100个GTID事务或10秒位单位分块，再按库、表分组块内数据放入入库队列，入库线程(固定10个)再获取数据重现操作到目标库，
+        并按100个GTID事务或10秒位单位分块，再按库、表分组块内数据放入入库队列，入库线程再获取数据重现操作到目标库，
         块内数据分组后的数据按GTID事务顺序执行，且一次性提交提高性能
     2、过滤实现：
         每个操作在row_event之前都会有table_map_event、query_event，其中包含该操作的库、表、线程ID等信息，过滤及获取
@@ -90,10 +97,12 @@
     保证数据入库，这样在集群模式下由其他节点接管时只产生报错而不会丢数据，可以手动跳过一个GTID事务来解决
     11、跨区域同步需要先在目标库执行create目录下文件创建回环控制的标签表
     12、binlog同步状态需等分块数据全入库提交才会保存，所以该dump_status保存的binlog信息落后于真正入库的数据
-    12、binlog解析队列最大长度位2048个GTID事务，如果master执行了大事务就会阻塞该表后面的事务执行，如果时间超过
+    13、binlog解析队列最大长度位2048个GTID事务，如果master执行了大事务就会阻塞该表后面的事务执行，如果时间超过
         60秒将导致队列超限直接退出程序
+    14、如果开启异构同步，最终入库关系由异构配置文件配置的内容控制，如果在配置文件中同步db1，但在异构配置中未配置db1的相关项
+    将不会对db1的数据进行操作
 
 ##python依赖包：
-   pip install pymysql struct IPy kazoo numpy
+   pip install pymysql struct IPy kazoo numpy jaydebeapi
 
 ####如有疑问可加qq群：479472450

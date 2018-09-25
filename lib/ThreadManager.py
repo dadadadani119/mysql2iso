@@ -35,7 +35,7 @@ class ThreadDump(Process):
             with Entrance(self._argv) as en:
                 pass
         elif self.type == 'repl_des':
-            from lib.destination import destination
+            from mode.mysql.destination import destination
             with destination(**self._argv) as des:
                 pass
         elif self.type == 'heart':
