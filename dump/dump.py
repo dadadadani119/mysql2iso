@@ -28,6 +28,7 @@ class Dump(escape):
         self.binlog = kwargs['binlog']
         self.database = None
         self.sql = None
+        self.queal_struct = None
 
     def prepare_structe(self,database,tablename):
         '''
@@ -54,7 +55,11 @@ class Dump(escape):
 
     def __column_join(self,cols):
         if self.destination_type == 'phoenix':
+            if self.queal_struct:
+                return ','.join(['{}'.format(cols[col]) for col in cols])
             return ','.join(['{}'.format(col) for col in cols])
+        if self.queal_struct:
+            return ','.join(['`{}`'.format(cols[col]) for col in cols])
         return ','.join(['`{}`'.format(col) for col in cols])
 
     def dump_to_new_db(self,database,tablename,idx,pri_idx,chunk_list=None,bytes_col_list=None,tbl=None,cols=None):
@@ -72,6 +77,7 @@ class Dump(escape):
                 '''
 
                 if tbl and cols:
+                    self.queal_struct = True
                     _cols = ','.join(['`{}`'.format(c) for c in cols])
                     sql = 'SELECT {} FROM {}.{} WHERE {}>=%s and {}<=%s ORDER BY {} LIMIT {},%s'.format(_cols,database, tablename,
                                                                                                    idx, idx, idx, limit_num)
