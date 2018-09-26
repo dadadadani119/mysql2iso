@@ -34,6 +34,7 @@ class InitMyDB(object):
                                               cursorclass=pymysql.cursors.DictCursor)
             return connection
         except:
+            Logging(msg='host: {}  port: {} '.format(self.mysql_host,self.mysql_port),level='error')
             Logging(msg=traceback.format_exc(),level='error')
             return None
 

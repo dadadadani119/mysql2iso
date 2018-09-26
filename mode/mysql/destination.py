@@ -102,13 +102,13 @@ class destination(escape):
 
 
         group_sql = {}
+        tmp_status = {}
         num = 0
         interval = int(time.time())
 
         while 1:
             if not self.queue.empty():
                 trancaction = self.queue.get()
-                #print(trancaction)
                 if 'table_struct' in trancaction:
                     global table_struct_list,table_pk_idex_list
                     table_struct_list = trancaction['table_struct'][0]
@@ -139,24 +139,44 @@ class destination(escape):
 
                 '''100个事务或者10s提交一次到并发序列'''
                 num += 1
-                if (num >= 100 or (int(time.time()) - interval) >= 10):
-                    if error_queue.empty():
-                        tmp_status = {'binlog':trancaction['binlog'],'at_pos':trancaction['at_pos'],
-                                      'next_pos':trancaction['next_pos'],'gtid':trancaction['gtid'],
-                                      'gno_uid':trancaction['gno_uid']}
-                        self.__check_stat(self.__put_queue(value=group_sql,tmp_status=tmp_status),only_state=True)
-
-                    else:
-                        for th in self.th_list:
-                            th.isDaemon()
-                        Logging(msg='an exception occurred in the inbound thread on destination db...',level='error')
-                        sys.exit()
+                tmp_status = {'binlog': trancaction['binlog'], 'at_pos': trancaction['at_pos'],
+                              'next_pos': trancaction['next_pos'], 'gtid': trancaction['gtid'],
+                              'gno_uid': trancaction['gno_uid']}
+                # if (num >= 100 or (int(time.time()) - interval) >= 10):
+                #     if error_queue.empty():
+                #         tmp_status = {'binlog':trancaction['binlog'],'at_pos':trancaction['at_pos'],
+                #                       'next_pos':trancaction['next_pos'],'gtid':trancaction['gtid'],
+                #                       'gno_uid':trancaction['gno_uid']}
+                #         self.__check_stat(self.__put_queue(value=group_sql,tmp_status=tmp_status),only_state=True)
+                #
+                #     else:
+                #         for th in self.th_list:
+                #             th.isDaemon()
+                #         Logging(msg='an exception occurred in the inbound thread on destination db...',level='error')
+                #         sys.exit()
+                if self.__put(group_sql=group_sql,tmp_status=tmp_status,num=num,interval=interval):
                     interval = int(time.time())
                     num = 0
                     group_sql = {}
                 continue
             else:
+                if self.__put(group_sql=group_sql,tmp_status=tmp_status,num=num,interval=interval):
+                    interval = int(time.time())
+                    num = 0
+                    group_sql = {}
                 time.sleep(0.001)
+
+    def __put(self,group_sql,tmp_status,num=None,interval=None):
+        if (num >= 100 or (int(time.time()) - interval) >= 10):
+            if error_queue.empty():
+                self.__check_stat(self.__put_queue(value=group_sql, tmp_status=tmp_status), only_state=True)
+                return True
+            else:
+                for th in self.th_list:
+                    th.isDaemon()
+                Logging(msg='an exception occurred in the inbound thread on destination db...', level='error')
+                sys.exit()
+        return False
 
     def __put_queue(self,value,tmp_status={}):
         '''

@@ -192,7 +192,6 @@ class OperationDB(escape):
             Logging(msg='binlog: {} position: {} gtid : {}'.format(_binlog_file, _binlog_pos, _excute_gtid),
                     level='info')
             '''初始化要记录得gtid'''
-            #print(_excute_gtid)
             _gtid = self.__gtid_set(_excute_gtid) if _excute_gtid else None
 
             ReplConn = ReplicationMysql(**rep_info).ReadPack()
