@@ -237,7 +237,9 @@ class processdump(Prepare):
             if idx_name is None and pri_idx is None:
                 idx_name,pri_idx = self.check_pri(cur=self.cur, db=database, table=tablename)
                 bytes_col_list = self.check_byte_col(cur=self.cur, db=database, table=tablename)
-                max_min = [self.get_max_min(cur=self.cur,databases=database,tables=tablename,index_name=idx_name)]
+                max_min = self.split_data(
+                    self.cur,self.get_max_min(cur=self.cur,databases=database,tables=tablename,index_name=idx_name),
+                    idx_name,database,tablename)
             if max_min and max_min[0]:
                 dump = Dump(cur=self.cur, des_conn=self.des_mysql_conn, des_cur=self.des_mysql_cur,
                             destination_type=self.destination_type, table_column_struct=self.table_column_struct,

@@ -147,12 +147,12 @@ class Prepare(object):
                 max_min = self.__get_chunk_min_max(cur,databases,tables,index_name,start)
             else:
                 max_min = self.__get_chunk_min_max(cur, databases, tables, index_name, start,chunk)
-            _max_min_list = self.__split_data(cur,max_min,index_name,databases,tables)
+            _max_min_list = self.split_data(cur,max_min,index_name,databases,tables)
             chunks_list.append(_max_min_list)
             start = max_min[1]
         return chunks_list,True
 
-    def __split_data(self,cur,max_min,index_name,database,tables):
+    def split_data(self,cur,max_min,index_name,database,tables):
         '''
         按10000一个区间拆分每个线程执行的数据
         :param data_list:

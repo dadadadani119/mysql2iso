@@ -167,7 +167,7 @@ class destination(escape):
                 time.sleep(0.001)
 
     def __put(self,group_sql,tmp_status,num=None,interval=None):
-        if (num >= 100 or (int(time.time()) - interval) >= 10):
+        if (num >= 100 or (int(time.time()) - interval) >= 10) and group_sql:
             if error_queue.empty():
                 self.__check_stat(self.__put_queue(value=group_sql, tmp_status=tmp_status), only_state=True)
                 return True

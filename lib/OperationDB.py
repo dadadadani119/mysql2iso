@@ -272,6 +272,7 @@ class OperationDB(escape):
                     2、如果满足同步要求，在table_map后将是row数据信息，因此在这对repl_mark标签进行操作，又由于一个GTID可能包含多个表
                     操作，故在此对标签库操作增加状态，一个GTID事务只做一次标签库操作
                     3、接受数据判断是否是repl_mark的操作，如果是将设置状态跳过当前GTID所有操作，用于回环控制
+                    4、有可能未使用gtid模式，所以在table_map进行标签操作，在xid_even进行结束操作
                     '''
                     tmepdata.database_name, tmepdata.table_name, tmepdata.cloums_type_id_list, tmepdata.metadata_dict=_parse_event.GetValue(type_code=event_code,event_length=event_length)  # 获取event数据
                     table_struce_key = '{}:{}'.format(tmepdata.database_name, tmepdata.table_name)

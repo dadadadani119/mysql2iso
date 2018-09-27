@@ -223,7 +223,7 @@ class desthread(GetSql):
             return False
         return True
 
-    def __set_mark(self,db_name,tbl_name,gtid,gno_id,at_pos):
+    def __set_mark(self,db_name,tbl_name,gtid,gno_id,at_pos,binlog):
         '''
         标签操作、也是状态记录,记得该表执行到的gtid、position位置
         :param db_name:
@@ -235,18 +235,18 @@ class desthread(GetSql):
         '''
         _name = '{}:{}'.format(db_name,tbl_name)
         if _name in self.status_row:
-            sql = 'UPDATE repl_mark.mark_status SET gno_uid=%s,gno_id=%s,at_pos=%s where db_name=%s and tbl_name=%s;'
-            args = [gtid, gno_id, at_pos,db_name,tbl_name]
+            sql = 'UPDATE repl_mark.mark_status SET gno_uid=%s,gno_id=%s,at_pos=%s,binlog=%s where db_name=%s and tbl_name=%s;'
+            args = [gtid, gno_id, at_pos,binlog,db_name,tbl_name]
         else:
             sql = 'select 1 from repl_mark.mark_status where  db_name = %s and tbl_name = %s;'
             if self.__raise_sql(sql=sql,args=[db_name,tbl_name],type=True):
                 _s = self.destination_cur.fetchall()
                 if _s:
-                    sql = 'UPDATE repl_mark.mark_status SET gno_uid=%s,gno_id=%s,at_pos=%s where db_name=%s and tbl_name = %s;'
-                    args = [gtid,gno_id,at_pos,db_name,tbl_name]
+                    sql = 'UPDATE repl_mark.mark_status SET gno_uid=%s,gno_id=%s,binlog=%s,at_pos=%s where db_name=%s and tbl_name = %s;'
+                    args = [gtid,gno_id,binlog,at_pos,db_name,tbl_name]
                 else:
-                    sql = 'INSERT INTO repl_mark.mark_status(db_name,tbl_name,gno_uid,gno_id,at_pos) VALUES(%s,%s,%s,%s,%s);'
-                    args = [db_name,tbl_name,gtid,gno_id,at_pos]
+                    sql = 'INSERT INTO repl_mark.mark_status(db_name,tbl_name,gno_uid,gno_id,binlog,at_pos) VALUES(%s,%s,%s,%s,%s,%s);'
+                    args = [db_name,tbl_name,gtid,gno_id,binlog,at_pos]
                 self.status_row.append('{}:{}'.format(db_name, tbl_name))
             else:
                 Logging(msg='execute sql [{}] error , exit now!!!!'.format(sql),level='error')
@@ -260,12 +260,12 @@ class desthread(GetSql):
         重起获取所有库、表已执行的游标
         :return:
         '''
-        sql = 'SELECT db_name,tbl_name,gno_uid,gno_id,at_pos FROM repl_mark.mark_status'
+        sql = 'SELECT db_name,tbl_name,gno_uid,gno_id,binlog,at_pos FROM repl_mark.mark_status'
         self.__check_stat(self.__raise_sql(sql=sql,type=True))
         result = self.destination_cur.fetchall()
         fetch_value = {}
         for row in result:
-            fetch_value['{}:{}'.format(row['db_name'],row['tbl_name'])] = [row['gno_uid'],row['gno_id'],row['at_pos']]
+            fetch_value['{}:{}'.format(row['db_name'],row['tbl_name'])] = [row['gno_uid'],row['gno_id'],row['at_pos'],row['binlog']]
         return fetch_value
 
     def __check_lock(self,db_tbl_name,lock_state=None):
@@ -310,20 +310,20 @@ class desthread(GetSql):
                         value_list = trancaction['value_list']
                         if value_list:
                             db_name,tbl_name = value_list[1],value_list[2]
-                            gno_uid,gno_id,at_pos = trancaction['gno_uid'],trancaction['gno_id'],value_list[3]
+                            gno_uid,gno_id,binlog,at_pos = trancaction['gno_uid'],trancaction['gno_id'],trancaction['binlog'],value_list[3]
 
                             if db_tbl_name in fetch_value:
-                                _state = self.__fetch_check(fetch_value[db_tbl_name],gno_uid,gno_id,at_pos)
+                                _state = self.__fetch_check(fetch_value[db_tbl_name],gno_uid,gno_id,at_pos,binlog)
                                 if _state:
                                     del fetch_value[db_tbl_name]
                                 else:
                                     continue
                             if tran_len >= 2:
                                 if __mark_status is None:
-                                    self.__set_mark(db_name=db_name, tbl_name=tbl_name, gtid=gno_uid,gno_id=gno_id, at_pos=at_pos)
+                                    self.__set_mark(db_name=db_name, tbl_name=tbl_name, gtid=gno_uid,gno_id=gno_id, at_pos=at_pos,binlog=binlog)
                                     __mark_status = True
                             else:
-                                self.__set_mark(db_name=db_name, tbl_name=tbl_name, gtid=gno_uid, gno_id=gno_id,
+                                self.__set_mark(db_name=db_name, tbl_name=tbl_name, gtid=gno_uid, gno_id=gno_id,binlog=binlog,
                                                 at_pos=at_pos)
 
                             sql_list = self.GetSQL(_values=value_list[0],event_code=value_list[4],database_name=db_name,table_name=tbl_name)
@@ -332,7 +332,7 @@ class desthread(GetSql):
                                     self.trancaction_list.append([sql[0], sql[1]])
                                     self.__check_stat(self.__raise_sql(sql=sql[0], args=sql[1]))
                     if __mark_status:
-                        self.__set_mark(db_name=db_name, tbl_name=tbl_name, gtid=gno_uid, gno_id=gno_id, at_pos=at_pos)
+                        self.__set_mark(db_name=db_name, tbl_name=tbl_name, gtid=gno_uid, gno_id=gno_id, at_pos=at_pos,binlog=binlog)
                     self.__raise_sql('commit',retry=True)
                     self.chunk_list_status_th[_uuid].append(self.thread_id)
                     self.trancaction_list = []
@@ -340,7 +340,7 @@ class desthread(GetSql):
                     self.thread_lock_queue[db_tbl_name].pop(0)
 
 
-    def __fetch_check(self,fetch,gno_uid,gno_id,at_pos):
+    def __fetch_check(self,fetch,gno_uid,gno_id,at_pos,binlog):
         '''
         重启或接管任务时通过游标库中相应库表保存的同步状态信息，比对获取到binlog的信息
         如果游标库中的uid和获取到的binlog中不同，这种情况可能是由于mysql宕机切换导致，
@@ -351,15 +351,25 @@ class desthread(GetSql):
         :param at_pos:
         :return:
         '''
-        if str(gno_uid) == str(fetch[0]):
-            if  int(fetch[1]) > int(gno_id):
+        if gno_uid:
+            if str(gno_uid) == str(fetch[0]):
+                if  int(fetch[1]) > int(gno_id):
+                    return False
+                elif int(gno_id) == int(fetch[1]) and int(fetch[2]) >= int(at_pos):
+                    return False
+                else:
+                    return True
+            elif str(gno_uid) != str(fetch[0]):
                 return False
-            elif int(gno_id) == int(fetch[1]) and int(fetch[2]) >= int(at_pos):
-                return False
+        else:
+            if fetch[-1] == binlog:
+                if int(fetch[2] >= int(at_pos)):
+                    return False
+                else:
+                    return True
             else:
-                return True
-        elif str(gno_uid) != str(fetch[0]):
-            return False
+                return False
+
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.destination_cur.close()
