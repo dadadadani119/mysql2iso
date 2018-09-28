@@ -261,6 +261,10 @@ class processdump(Prepare):
         idx_name, pri_idx = self.check_pri(cur=self.cur, db=database, table=tablename)
 
         chunks_list,uli = self.get_chunks(cur=self.cur, databases=database, tables=tablename,index_name=idx_name)
+        if len(self.des_thread_list) < 1:
+            self.__init_info(des=True)
+        stat = self.queal_struct if self.queal_struct else self.dump.prepare_structe(database=database,
+                                                                                     tablename=tablename)
         #bytes_col_list = self.check_byte_col(cur=self.cur,db=database,table=tablename)
         if chunks_list is None:
             Logging(msg='this table {} chunks_list is None,maybe this table not data'.format(tablename),level='warning')
@@ -269,13 +273,12 @@ class processdump(Prepare):
             '''多线程'''
 
             '''初始化目标库所有并发链接及函数'''
-            if len(self.des_thread_list) < 1:
-                self.__init_info(des=True)
+            if len(self.des_thread_list) <= 1:
                 if self.threads and self.threads > 1:
                     # self.init_conn()
                     self.init_des_conn(binlog=self.binlog)
-            stat = self.queal_struct if self.queal_struct else self.dump.prepare_structe(database=database,
-                                                                                         tablename=tablename)
+            # stat = self.queal_struct if self.queal_struct else self.dump.prepare_structe(database=database,
+            #                                                                              tablename=tablename)
             if stat:
                 self.__getcolumn(database,tablename)
                 for t in range(len(self.thread_list)):
