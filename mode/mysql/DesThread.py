@@ -368,7 +368,12 @@ class desthread(GetSql):
                 else:
                     return True
             else:
-                return False
+                binlog_num_cur = int(fetch[-1].split('.')[-1])
+                binlog_num_sync = int(binlog.split('.')[-1])
+                if binlog_num_cur < binlog_num_sync:
+                    return False
+                else:
+                    return True
 
 
     def __exit__(self, exc_type, exc_val, exc_tb):
