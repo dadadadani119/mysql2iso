@@ -35,16 +35,25 @@ class GetConf(object):
             'ssl':False,                    #ssl链接
             'cert':None,
             'key':None,
-            'daemon':None                   #重启操作
+            'daemon':None,                  #重启操作
+            'destnation_type':'mysql',         #目标库类型
+            'queal_struct':False,            #同构、异构
+            'map_conf':None ,                #异构对应关系
+            'lookback':False                #回环控制
         }
         global_options = self.conf.options(self.global_s)
         for option in global_options:
             if option in options_conf:
                 option_value = self.conf.get(self.global_s, option)
-                if option in ('full','ssl','daemon'):
+                if option in ('full','ssl','daemon','queal_struct','lookback'):
                     options_conf[option] = True if option_value == 'True' else False
                 elif option in ('threads','server_id','ignore_thread'):
                     options_conf[option] = int(option_value) if option_value else None
+                elif option == 'destnation_type':
+                    if options_conf[option] in ('mysql','phoenix'):
+                        options_conf[option] = option_value
+                    else:
+                        Logging(msg='invalid option {} ,useing default config'.format(option), level='warning')
                 else:
                     options_conf[option] = option_value if option_value else None
             else:
@@ -96,20 +105,27 @@ class GetConf(object):
         :return:
         '''
         options_conf = {
+            'dthreads' : 1,                      #入库线程数
             'dhost' : None,                     #目标库地址
             'dport' : 3306,                     #目标库端口，默认3306
             'duser' : None,                     #目标库用户名
             'dpassword' : None,                 #目标库用户密码
-            'binlog' : False                    #同步数据是否记录到binlog,默认不记录
+            'binlog' : False,                   #同步数据是否记录到binlog,默认不记录
+            'jar' : None,                       #phoenix使用jar包地址
+            'jar_conf' : {}                     #phoenix配置参数列表
         }
         des_options = self.conf.options(self.destination)
         for option in des_options:
             if option in options_conf:
                 option_value  = self.conf.get(self.destination,option)
-                if option == 'dport':
+                if option in 'dport':
                     options_conf[option] = int(option_value) if option_value else 3306
                 elif option == 'binlog':
                     options_conf[option] = True if option_value == 'True' else False
+                elif option == 'jar_conf':
+                    options_conf[option] = eval(option_value)
+                elif option == 'dthreads':
+                    options_conf[option] = int(option_value)
                 else:
                     options_conf[option] = option_value if option_value else None
             else:
@@ -131,7 +147,7 @@ class GetConf(object):
             'sport' : 3306,                     #目标库端口，默认3306
             'suser' : None,                     #目标库用户名
             'spassword' : None,                 #目标库用户密码
-            'sbinlog' : False                    #同步数据是否记录到binlog,默认不记录
+            'sbinlog' : False                   #同步数据是否记录到binlog,默认不记录
         }
         des_options = self.conf.options(self.status)
         for option in des_options:
@@ -189,6 +205,20 @@ class GetIso:
 
         return option_conf
 
+
+
+class GetStruct:
+    def __init__(self,map_name):
+        conf_path = path.replace('\\', '/') + '/map/{}'.format(map_name)
+        self.conf = configparser.ConfigParser()
+        self.conf.read(conf_path, encoding="utf-8-sig")
+
+    def get(self):
+        dbs = self.conf.options('source_db')
+        struct_list = {}
+        for db in dbs:
+            struct_list[db]=eval(self.conf.get('source_db', db))
+        return struct_list
 
 #get = GetConf()
 #print(get.GetGlobal())
