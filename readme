@@ -103,6 +103,6 @@
     14、如果开启异构同步，最终入库关系由异构配置文件配置的内容控制，如果在配置文件中同步db1，但在异构配置中未配置db1的相关项
     将不会对db1的数据进行操作
 
-##python所有依赖包(不同的目标库需求不同)：
+##python所有依赖包：
    pip install pymysql struct IPy kazoo numpy jaydebeapi psycopg2 phoenixdb
 
