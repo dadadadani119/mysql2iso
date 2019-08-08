@@ -67,6 +67,8 @@
             sport： 状态库端口
             suser/spassword： 状态库账号密码，需要创建库、表权限
             binlog: 是否记录binlog,可配置True/False，默认为False，在链接创建时将设置sql_log_bin=0
+        attach: 单独过滤操作
+            ignores： 过滤配置，例子见文件
     异构map:
         source_db:
             配置库名对应异构情况，见map_example
