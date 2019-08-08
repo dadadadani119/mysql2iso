@@ -163,8 +163,6 @@ class Dump(escape):
                         #     self.__check_stat(self.__raise_sql(sql=_sql, args=_values, retry=True))
                         #     self.__check_stat(self.__raise_sql(sql='commit'))
 
-                        with_msgid = []
-
                         for row in self.result:
                             if self.queal_struct:
                                 row = iso_value.iso_value(valus=row)
