@@ -1,15 +1,13 @@
 # -*- coding: utf-8 -*-
 ''' 
 @Time    : 2018/7/21 13:20
-@Author  : Great God
+@Author  : xiao cai niao
 @File    : destination.py
 @Software: PyCharm
 '''
 import sys
 import time,uuid
-from .DesThread import desthread
 sys.path.append("..")
-from mode.phoenix.DesThreadPhoenix import desthread as desthreadphoenix
 from lib.Loging import Logging
 from lib.escape import escape
 from binlog.PrepareStructure import GetStruct
@@ -226,12 +224,21 @@ class ThreadDump(threading.Thread):
                 pass
         else:
             if self.kwargs['destnation_type'] == 'phoenix':
+                from mode.phoenix.DesThreadPhoenix import desthread as desthreadphoenix
                 with desthreadphoenix(**dict(self.kwargs,**{'thread_lock':thread_lock,'thread_lock_queue':thread_lock_queue,
                                                      'chunk_list_status_th':chunk_list_status_th,
                                                      'table_struct_list':table_struct_list,
                                                      'table_pk_idex_list':table_pk_idex_list})):
                     pass
+            elif self.kwargs['destnation_type'] == 'postgresql':
+                from mode.postgresql.DesThreadPG import desthread as desthreadpg
+                with desthreadpg(**dict(self.kwargs,**{'thread_lock':thread_lock,'thread_lock_queue':thread_lock_queue,
+                                                     'chunk_list_status_th':chunk_list_status_th,
+                                                     'table_struct_list':table_struct_list,
+                                                     'table_pk_idex_list':table_pk_idex_list})):
+                    pass
             else:
+                from .DesThread import desthread
                 with desthread(**dict(self.kwargs,**{'thread_lock':thread_lock,'thread_lock_queue':thread_lock_queue,
                                                      'chunk_list_status_th':chunk_list_status_th,
                                                      'table_struct_list':table_struct_list,

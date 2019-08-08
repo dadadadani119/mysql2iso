@@ -1,6 +1,6 @@
 # -*- encoding: utf-8 -*-
 '''
-@author: Great God
+@author: xiao cai niao
 '''
 
 import struct,pymysql

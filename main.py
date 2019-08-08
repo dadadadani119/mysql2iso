@@ -1,6 +1,6 @@
 # -*- encoding: utf-8 -*-
 '''
-@author: Great God
+@author: xiao cai niao
 '''
 import os
 from lib import get_conf
@@ -9,7 +9,9 @@ from cluster import InitCluster
 from lib.Loging import Logging
 import queue
 
+
 my_queue = queue.Queue(2048)
+
 
 def init():
     _get = get_conf.GetIso()
@@ -29,12 +31,12 @@ def init():
 
 
             with InitCluster.ClusterEnt(**dict(task_list,**{'zk_hosts':_argv['zk_hosts'],
-                                                            'cluster_type':_argv['cluster_type']})):
+                                                            'cluster_type':_argv['cluster_type'],'server_port':_argv['server_port']})):
                 pass
         elif _argv['cluster_type'] == 'leader_mode':
             with InitCluster.ClusterEnt(**dict(task_list,**{'cluster_nodes':_argv['cluster_nodes'],
                                                             'cluster_type': _argv['cluster_type'],
-                                                            'self_host':_argv['host']})):
+                                                            'self_host':_argv['host'],'server_port':_argv['server_port']})):
                 pass
         else:
             Logging(msg='invalid option cluster_type {}'.format(_argv['cluster_type']), level='warning')
@@ -46,7 +48,7 @@ def init():
 def start(conf_name):
     _get = get_conf.GetConf(conf_name)
     _argv = {}
-    _argv = dict(_argv,**dict(_get.GetGlobal(),**dict(_get.GetSource(),**dict(_get.GetDestination(),**_get.GetStatus()))))
+    _argv = dict(_argv,**dict(_get.GetGlobal(),**dict(_get.GetSource(),**dict(_get.GetDestination(),**dict(_get.GetStatus(),**_get.GetAttact())))))
     return _argv
 
 

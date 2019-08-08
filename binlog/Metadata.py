@@ -1,6 +1,6 @@
 # -*- encoding: utf-8 -*-
 '''
-@author: Great God
+@author: xiao cai niao
 '''
 
 class column_type_dict:
@@ -76,6 +76,7 @@ class binlog_events:
     GTID_LOG_EVENT= 33
     ANONYMOUS_GTID_LOG_EVENT= 34
     PREVIOUS_GTIDS_LOG_EVENT= 35
+    XA_PREPARE_LOG_EVENT = 38
 ''''''
 
 '''json type'''

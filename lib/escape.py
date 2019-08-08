@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 ''' 
 @Time    : 2018/7/17 13:41
-@Author  : Great God
+@Author  : xiao cai niao
 @File    : escape.py
 @Software: PyCharm
 '''
@@ -21,6 +21,7 @@ class escape:
             for i in value:
                 if type(i) in (list,dict):
                     _a.append(json.dumps(self.__escape_struct(i)))
+
                 else:
                     _a.append(i)
             return _a
@@ -68,17 +69,19 @@ class escape:
                 elif type(args[i]) == int:
                     _args.append(args[i])
                 else:
-                    _args.append("'Null'")
+                    _args.append("''")
             return _args
         elif type(args) ==str:
             if args in ('null','Null'):
-                return "'Null'"
+                return "''"
             else:
-                if '\'' in args:
+                if '\'' in args or '\\' in args:
+                    args = args.replace('\\','\\\\')
                     return "'{}'".format(args.replace('\'', '\\\''))
-
                 return "'{}'".format(args)
         elif type(args) == int:
             return args
+        elif type(args) == bytes:
+            return "'{}'".format(args)
         else:
-            return "'Null'"
+            return "''"

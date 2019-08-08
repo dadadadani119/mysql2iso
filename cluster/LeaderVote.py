@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 ''' 
 @Time    : 2018/6/28 15:25
-@Author  : Great God
+@Author  : xiao cai niao
 @File    : LeaderVote.py
 @Software: PyCharm
 '''

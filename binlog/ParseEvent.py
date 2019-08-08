@@ -1,6 +1,6 @@
 # -*- encoding: utf-8 -*-
 '''
-@author: Great God
+@author: xiao cai niao
 '''
 import datetime
 import struct
@@ -71,18 +71,32 @@ class ParseEvent(ReadPacket.Read):
     def read_rotate_log_event(self,event_length=None):
         '''
         Fixed data part: 8bytes
-        Variable data part: event_length - header_length - fixed_length
+        Variable data part: event_length - header_length - fixed_length (string<EOF>)
         :param event_length: 
         :return: 
         '''
-        if self.remote:
-            variable_length = event_length - Metadata.binlog_event_header_len - 8 - 1 - Metadata.src_length + 1
-        else:
-            variable_length = event_length - Metadata.binlog_event_header_len - 8 - Metadata.src_length + 1
-
+        __start_s = Metadata.binlog_event_header_len + 8
         self.read_bytes(8)
-        value, = struct.unpack('{}s'.format(variable_length),self.read_bytes(variable_length))
-        return value
+        __pack = self.read_bytes(event_length - Metadata.binlog_event_header_len - 8)
+
+        __end_s = __pack.find(b'\0', __start_s)
+        if __end_s > 0:
+            var_len = __end_s - __start_s
+            value, = struct.unpack('{}s'.format(var_len), __pack[__start_s:__end_s])
+        else:
+            var_len = len(__pack)
+            value, = struct.unpack('{}s'.format(var_len), __pack)
+        return value.decode()
+
+        # if self.remote:
+        #     # end_s = self.data_packet.find(b'\0', self.packet)
+        #     variable_length = event_length - Metadata.binlog_event_header_len - 8 - 1 - Metadata.src_length + 1
+        # else:
+        #     variable_length = event_length - Metadata.binlog_event_header_len - 8 - Metadata.src_length + 1
+        #
+        # self.read_bytes(8)
+        # value, = struct.unpack('{}s'.format(variable_length),self.read_bytes(variable_length))
+        # return value.decode()
 
 
     def read_table_map_event(self, event_length):
@@ -325,7 +339,11 @@ class ParseEvent(ReadPacket.Read):
                                                    Metadata.column_type_dict.MYSQL_TYPE_BIT]:
                     _metadata = metadata_dict[idex]
                     value_length = self.read_uint_by_size(_metadata)
-                    values.append(self.read_decode(value_length))
+                    _v = self.read_decode(value_length)
+                    if 'char' in unsigned_list[idex]  or 'text' in unsigned_list[idex]:
+                        values.append(_v.decode())
+                    else:
+                        values.append(_v)
                     bytes += value_length + _metadata
                 elif colums_type_id_list[idex] in [Metadata.column_type_dict.MYSQL_TYPE_JSON]:
                     _metadata = metadata_dict[idex]
@@ -336,11 +354,11 @@ class ParseEvent(ReadPacket.Read):
                     _metadata = metadata_dict[idex]
                     if _metadata <= 255:
                         value_length = self.read_uint8()
-                        values.append(self.read_decode(value_length))
+                        values.append((self.read_decode(value_length)).decode())
                         _read = 1
                     else:
                         value_length = self.read_uint16()
-                        values.append(self.read_decode(value_length))
+                        values.append((self.read_decode(value_length)).decode())
                         _read = 2
                     bytes += value_length + _read
                 elif colums_type_id_list[idex] == Metadata.column_type_dict.MYSQL_TYPE_ENUM:

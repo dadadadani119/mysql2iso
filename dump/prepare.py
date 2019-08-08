@@ -1,6 +1,6 @@
 # -*- encoding: utf-8 -*-
 '''
-@author: Great God
+@author: xiao cai niao
 '''
 import pymysql
 import traceback
@@ -8,8 +8,8 @@ import sys
 sys.path.append("..")
 from lib.InitDB import InitMyDB
 from lib.Loging import Logging
-from mode.phoenix.InitDB import InitDB as InitPhoenixDB
-
+import time
+from threading import Thread
 class Prepare(object):
     def __init__(self,threads,src_kwargs,des_kwargs,jar=None,jar_conf=None,destination_type=None):
         self.threads = threads
@@ -62,6 +62,7 @@ class Prepare(object):
         '''
         for i in range(self.threads-1):
             if self.destination_type == 'phoenix':
+                from mode.phoenix.InitDB import InitDB as InitPhoenixDB
                 conn = InitPhoenixDB(host=self.des_conn_info['mysql_host'],port=self.des_conn_info['mysql_port'],
                                      user=self.des_conn_info['mysql_user'],passwd=self.des_conn_info['mysql_password'],
                                      jar=self.jar,jar_conf=self.jar_conf).Init()
@@ -71,13 +72,16 @@ class Prepare(object):
                     except:
                         Logging(msg=traceback.format_exc(), level='error')
             else:
-                conn = InitMyDB(**self.des_conn_info).Init()
+                conn = InitMyDB(**dict(self.des_conn_info,**{'type':self.destination_type})).Init()
                 if conn:
                     try:
                         cur = conn.cursor()
-                        if binlog is None:
-                            cur.execute('set sql_log_bin=0;')
-                        cur.execute('SET SESSION wait_timeout = 2147483;')
+                        if self.destination_type and self.destination_type != 'mysql':
+                            pass
+                        else:
+                            if binlog is None:
+                                cur.execute('set sql_log_bin=0;')
+                            cur.execute('SET SESSION wait_timeout = 2147483;')
                     except:
                         Logging(msg=traceback.format_exc(), level='error')
             self.des_thread_list.append({'conn': conn, 'cur': cur})
@@ -125,6 +129,10 @@ class Prepare(object):
         :param tables:
         :return:
         '''
+        c = CountdownTask()
+        t = Thread(target=c.run, args=(self.thread_list,))
+        t.start()
+
         #cur.execute('select {} from {}.{} group by {} order by {}'.format(index_name,databases,tables,index_name,index_name))
         cur.execute('select count(*) as count  from {}.{} '.format(databases, tables))
         result = cur.fetchall()
@@ -150,17 +158,35 @@ class Prepare(object):
             _max_min_list = self.split_data(cur,max_min,index_name,databases,tables)
             chunks_list.append(_max_min_list)
             start = max_min[1]
+        while t.is_alive():
+            Logging(msg='this check mysql connections is running....',level='warning')
+            c.terminate()
+            t.join()
+            time.sleep(1)
+
         return chunks_list,True
 
-    def split_data(self,cur,max_min,index_name,database,tables):
+    def __check_conn(self):
+        for th in self.thread_list:
+            try:
+                th['cur'].execute('select 1')
+            except:
+                Logging(msg=traceback.format_exc(),level='error')
+                sys.exit()
+
+
+    def split_data(self,cur,max_min,index_name,database,tables,muli=True):
         '''
         按10000一个区间拆分每个线程执行的数据
         :param data_list:
         :return:
         '''
         _min,_max = max_min[0],max_min[1]
-        cur.execute('select count(*) as count  from {}.{}  where {} >= %s and {} <= %s'.format(
-            database,tables,index_name,index_name),max_min)
+        if muli:
+            cur.execute('select count(*) as count  from {}.{}  where {} >= %s and {} <= %s'.format(
+                database,tables,index_name,index_name),max_min)
+        else:
+            cur.execute('select count(*) as count from {}.{}'.format(database,tables))
         result = cur.fetchall()
         total_rows = result[0]['count']
         _tmp = []
@@ -303,3 +329,23 @@ class Prepare(object):
         _tmp = [row['TABLE_NAME'] for row in result]
         return _tmp
 
+
+class CountdownTask:
+    def __init__(self):
+        self._running = True
+
+    def terminate(self):
+        self._running = False
+
+    def run(self, th_list):
+        _th_list = th_list.copy()
+        if _th_list:
+            _th_list.pop(0)
+        while self._running and len(th_list) > 0:
+            for th in _th_list:
+                try:
+                    th['cur'].execute('select 1')
+                except:
+                    Logging(msg=traceback.format_exc(), level='error')
+                    sys.exit()
+            time.sleep(60)

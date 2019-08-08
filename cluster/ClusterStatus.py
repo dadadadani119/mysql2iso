@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 ''' 
 @Time    : 2018/6/28 15:23
-@Author  : Great God
+@Author  : xiao cai niao
 @File    : ClusterStatus.py
 @Software: PyCharm
 '''

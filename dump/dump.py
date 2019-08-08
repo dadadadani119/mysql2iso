@@ -1,6 +1,6 @@
 # -*- encoding: utf-8 -*-
 '''
-@author: Great God
+@author: xiao cai niao
 '''
 import pymysql
 import sys,time
@@ -8,9 +8,10 @@ import traceback
 sys.path.append("..")
 from lib.Loging import Logging
 from lib.escape import escape
-from mode.phoenix.InitDB import InitDB as InitPhoenixDB
 from lib.InitDB import InitMyDB
 from lib.ErrorCode import ErrorCode
+from lib.valuseiso import Iso
+
 
 class Dump(escape):
     def __init__(self,**kwargs):
@@ -29,6 +30,11 @@ class Dump(escape):
         self.database = None
         self.sql = None
         self.queal_struct = None
+        if self.destination_type == 'postgresql':
+            import psycopg2
+        elif self.destination_type == 'phoenix':
+            import phoenixdb
+            from mode.phoenix.InitDB import InitDB as InitPhoenixDB
 
     def prepare_structe(self,database,tablename):
         '''
@@ -40,7 +46,6 @@ class Dump(escape):
         :return:
         '''
         if self.destination_type != 'phoenix':
-
             self.__check_stat(self.__raise_sql(sql='CREATE DATABASE IF NOT EXISTS {}'.format(database),retry=True))
 
 
@@ -53,21 +58,58 @@ class Dump(escape):
             self.__check_stat(self.__raise_sql(sql=create_sql,retry=True))
         return True
 
-    def __column_join(self,cols):
-        if self.destination_type == 'phoenix':
-            if self.queal_struct:
-                return ','.join(['{}'.format(cols[col]) for col in cols])
-            return ','.join(['{}'.format(col) for col in cols])
+    def __column_join(self,cols,source=None):
+        if self.destination_type in ('phoenix','postgresql'):
+            if source:
+                if self.queal_struct:
+                    return ','.join(['`{}`'.format(cols[col]) for col in cols])
+                return ','.join(['`{}`'.format(col) for col in cols])
+            else:
+                if self.queal_struct:
+                    return ','.join(['{}'.format(cols[col]) for col in cols])
+                return ','.join(['{}'.format(col) for col in cols])
         if self.queal_struct:
             return ','.join(['`{}`'.format(cols[col]) for col in cols])
         return ','.join(['`{}`'.format(col) for col in cols])
 
-    def dump_to_new_db(self,database,tablename,idx,pri_idx,chunk_list=None,bytes_col_list=None,tbl=None,cols=None):
+
+    def dump_to_new_db(self,database,tablename,idx,pri_idx,chunk_list=None,bytes_col_list=None,tbl=None,cols=None,iso=None):
         self.database = database
+        iso_value = Iso(**{'iso': iso, 'conf_cols': cols})
+        ''''''
+        if tbl and cols:
+            self.queal_struct = True
+            _cols, _dcols, _ucols = iso_value.get_cols()
+            _cols = ','.join(['`{}`'.format(c) for c in _cols])
+
+        sql_type = 'INSERT'
+        if self.destination_type in ('phoenix', 'postgresql'):
+            sql_type = 'UPSERT'
+
+        if tbl:
+            if cols:
+                if iso:
+                    if self.destination_type == 'phoenix':
+                        _cl = ','.join(['{}'.format(col) for col in _dcols] + ['deleted'])
+                    else:
+                        _cl = ','.join(['`{}`'.format(col) for col in _dcols])
+                    insert_sql = '{} INTO {}.{}({}) VALUES'.format(sql_type, tbl[0], tbl[1], _cl)
+                else:
+                    insert_sql = '{} INTO {}.{}({}) VALUES'.format(sql_type, tbl[0], tbl[1], self.__column_join(cols))
+            else:
+                insert_sql = '{} INTO {}.{}({}) VALUES'.format(sql_type, tbl[0], tbl[1],
+                                                               self.__column_join(self.table_column_struct))
+        else:
+            insert_sql = '{} INTO {}.{}({}) VALUES'.format(sql_type, database, tablename,
+                                                           self.__column_join(self.table_column_struct))
+        ''''''
+
         for cl in chunk_list:
             start_num = cl[0]
             end_num = cl[1]
             limit_num = 0
+
+
             while True:
                 '''
                 第一次使用分块大小limit N,M, N代表起始个数位置（chunks大小），M代表条数
@@ -77,12 +119,10 @@ class Dump(escape):
                 '''
 
                 if tbl and cols:
-                    self.queal_struct = True
-                    _cols = ','.join(['`{}`'.format(c) for c in cols])
                     sql = 'SELECT {} FROM {}.{} WHERE {}>=%s and {}<=%s ORDER BY {} LIMIT {},%s'.format(_cols,database, tablename,
                                                                                                    idx, idx, idx, limit_num)
                 else:
-                    sql = 'SELECT {} FROM {}.{} WHERE {}>=%s and {}<=%s ORDER BY {} LIMIT {},%s'.format(self.__column_join(self.table_column_struct),
+                    sql = 'SELECT {} FROM {}.{} WHERE {}>=%s and {}<=%s ORDER BY {} LIMIT {},%s'.format(self.__column_join(self.table_column_struct,True),
                                                                                                         database, tablename,
                                                                                                    idx, idx, idx, limit_num)
 
@@ -93,53 +133,54 @@ class Dump(escape):
                 拼接行数据为pymysql格式化列表
                 如果返回数据为空直接退出
                 '''
-                all_value = []
-                sql_type = 'INSERT'
+                self.all_value = []
+
                 if self.result:
                     _len = len(self.result[0])
                     _num = len(self.result)
-                    if self.destination_type != 'phoenix':
+
+                    ''''''
+
+
+                    if self.destination_type == 'phoenix':
+                        _valus_list = []
                         for row in self.result:
-                            all_value += row.values()
-                    else:
-                        sql_type = 'UPSERT'
-                else:
-                    #Logging(msg='return value is empty',level='warning')
-                    break
+                            if self.queal_struct:
+                                row = iso_value.iso_value(row)
+                            _values = [_ for _ in row.values()]
+                            _valus_list.append(self.escape_string(_values))
+                        _len = len(_valus_list[0])
+                        _sql = insert_sql + '{}'.format(self.__combination_value_format(_len=_len, _num=None))
+                        self.__check_stat(self.__raise_sql(sql=_sql, args=_valus_list, retry=True))
 
-                if tbl:
-                    if cols:
-                        sql = '{} INTO {}.{}({}) VALUES'.format(sql_type,tbl[0], tbl[1], self.__column_join(cols))
                     else:
-                        sql = '{} INTO {}.{}({}) VALUES'.format(sql_type,tbl[0], tbl[1],
-                                                                self.__column_join(self.table_column_struct))
-                else:
-                    sql = '{} INTO {}.{}({}) VALUES'.format(sql_type,database, tablename,
-                                                            self.__column_join(self.table_column_struct))
+                        # for row in self.result:
+                        #     if self.queal_struct:
+                        #         row = iso_value.iso_value(row)
+                        #     _values = [_ for _ in row.values()]
+                        #     _len = len(_values)
+                        #     _sql = insert_sql + '{}'.format(self.__combination_value_format(_len=_len, _num=None))
+                        #     self.__check_stat(self.__raise_sql(sql=_sql, args=_values, retry=True))
+                        #     self.__check_stat(self.__raise_sql(sql='commit'))
 
-                if self.destination_type == 'phoenix':
-                    for row in self.result:
-                        _len = len(row)
-                        _values = [_ for _ in row.values()]
-                        _sql = sql + '{}'.format(self.__combination_value_format(_len=_len,_num=None))
-                        _values = self.escape_string(_values)
-                        _values = self.escape_args(_values)
-                        self.sql = _sql % tuple(_values)
-                        self.__check_stat(self.__raise_sql(sql=self.sql, retry=True))
+                        with_msgid = []
+
+                        for row in self.result:
+                            if self.queal_struct:
+                                row = iso_value.iso_value(valus=row)
+                                self.all_value += row.values()
+
+                                continue
+                            self.all_value += row.values()
+                        if self.queal_struct:
+                            _len = len(_dcols)
+                        self.sql = insert_sql + '{}'.format(self.__combination_value_format(_len=_len,_num=_num))
+                        self.__check_stat(self.__raise_sql(sql=self.sql,args=self.all_value))
                         self.__check_stat(self.__raise_sql(sql='commit'))
 
                 else:
-                    # for row in self.result:
-                    #     _len = len(row)
-                    #     _values = [_ for _ in row.values()]
-                    #     _sql = sql + '{}'.format(self.__combination_value_format(_len=_len,_num=None))
-                    #     self.__check_stat(self.__raise_sql(sql=_sql, args=_values,retry=True))
-                    #     self.__check_stat(self.__raise_sql(sql='commit'))
-
-
-                    self.sql = sql + '{}'.format(self.__combination_value_format(_len=_len,_num=_num))
-                    self.__check_stat(self.__raise_sql(sql=self.sql,args=all_value))
-                    self.__check_stat(self.__raise_sql(sql='commit'))
+                    #Logging(msg='return value is empty',level='warning')
+                    break
 
                 '''
                 每次循环结束计算该线程还剩未处理的条数（limit_num）
@@ -163,7 +204,7 @@ class Dump(escape):
     def __get_from_source_db_limit2000(self,sql,args_value):
         try:
             if args_value:
-
+                #print(sql,args_value)
                 self.mysql_cur.execute(sql, args_value + [2000])
             else:
                 self.mysql_cur.execute(sql,2000)
@@ -172,47 +213,14 @@ class Dump(escape):
             Logging(msg=traceback.format_exc(),level='error')
             sys.exit()
 
-    # def __split_data(self,start,end,idx_name,db,table):
-    #     '''
-    #     该函数主要作用是在数据量大时在各个线程中继续对数据进行分区
-    #     在大于10000条时才会进行继续拆分
-    #     用10000作为拆分的基数条件获取模糊的分区数
-    #     再利用去重后的索引值获取每个分区最大最小值
-    #     :param start:
-    #     :param end:
-    #     :param idx_name:
-    #     :param db:
-    #     :param table:
-    #     :return:
-    #     '''
-    #     sql = 'select count(*) as count from {}.{} where {}>=%s and {}<=%s'.format(idx_name,db,table,idx_name,idx_name)
-    #     self.mysql_cur.execute(sql,args=[start,end])
-    #     result = self.mysql_cur.fetchall()
-    #     total_rows = result[0]['count']
-    #     split_list = []
-    #     if total_rows > 20000:
-    #         split_chunks = int(total_rows/10000)
-    #         _sort_values = sorted(set(values), key=values.index)
-    #         _nums = int(_sort_values/split_chunks)
-    #         _n = 0
-    #         for v in range(split_chunks):
-    #             if v == (split_chunks -1):
-    #                 _t = _sort_values[_n:-1]
-    #                 split_list.append([_t[0],_t[-1]])
-    #             else:
-    #                 _t = _sort_values[_n:_n+_nums]
-    #                 split_list.append([_t[0],_t[-1]])
-    #             _n += _nums
-    #
-    #     else:
-    #         split_list.append[start,end]
-    #     return split_list
-
 
 
     def __combination_value_format(self,_len,_num):
         '''拼接格式化字符'''
-        one_format = '({})'.format(','.join(['%s' for i in range(_len)]))
+        if self.destination_type == 'phoenix':
+            one_format = '({})'.format(','.join(['?' for i in range(_len)]))
+        else:
+            one_format = '({})'.format(','.join(['%s' for i in range(_len)]))
         if _num:
             all_ = ','.join(one_format for i in range(_num))
             return all_
@@ -233,7 +241,29 @@ class Dump(escape):
             if sql == 'commit':
                 self.des_mysql_conn.commit()
             else:
-                self.des_mysql_cur.execute(sql, args)
+                if self.destination_type == 'phoenix':
+                    self.des_mysql_cur.executemany(sql,args)
+                else:
+                    self.des_mysql_cur.execute(sql, args)
+        except phoenixdb.errors.InternalError:
+            Logging(msg=traceback.format_exc(), level='error')
+            self.__retry_execute(sql=sql,args=args,retry=retry)
+            return True
+        except psycopg2.OperationalError as e:
+            Logging(msg=e.args, level='error')
+            #Logging(msg='sql:{},values:{}'.format(sql, args), level='error')
+            if sql == 'commit':
+                self.__retry_execute(retry=retry)
+            else:
+                self.__retry_execute(sql=sql,args=args,retry=retry)
+            return True
+        except psycopg2.InterfaceError as e:
+            Logging(msg=e.args, level='error')
+            if sql == 'commit':
+                self.__retry_execute(retry=retry)
+            else:
+                self.__retry_execute(sql=sql,args=args,retry=retry)
+            return True
         except pymysql.Error as e:
             Logging(msg=e.args, level='error')
             if e.args[0] in ErrorCode:
@@ -275,8 +305,8 @@ class Dump(escape):
             return
         else:
             #Logging(msg='sql={},args={},retry={},type={}'.format(sql, args,retry, type), level='info')
-            Logging(msg='retry execute sql {}'.format(self.sql),level='info')
-            self.__raise_sql(sql=self.sql, args=args,retry=True)
+            Logging(msg='retry execute sql',level='info')
+            self.__raise_sql(sql=self.sql, args=self.all_value,retry=True)
             self.__raise_sql('commit')
             return
 
@@ -288,6 +318,14 @@ class Dump(escape):
         :return:
         '''
         import time
+        if self.des_mysql_conn:
+            try:
+                Logging(msg='close destination db connection',level='info')
+                self.des_mysql_conn.close()
+                self.des_mysql_cur.close()
+            except:
+                Logging(msg=traceback.format_exc(),level='error')
+        time.sleep(10)
         for i in range(60):
             Logging(msg='connection to destination db try agian!!!', level='info')
             if self.destination_type == 'phoenix':
@@ -303,13 +341,16 @@ class Dump(escape):
                     except:
                         Logging(msg=traceback.format_exc(), level='error')
             else:
-                self.des_mysql_conn = InitMyDB(**self.des_conn_info).Init()
+                self.des_mysql_conn = InitMyDB(**dict(self.des_conn_info,**{'type':self.destination_type})).Init()
                 if self.des_mysql_conn:
                     try:
                         self.des_mysql_cur = self.des_mysql_conn.cursor()
-                        if self.binlog is None:
-                            self.des_mysql_cur.execute('set sql_log_bin=0;')
-                        self.des_mysql_cur.execute('SET SESSION wait_timeout = 2147483;')
+                        if self.destination_type and self.destination_type != 'mysql':
+                            pass
+                        else:
+                            if self.binlog is None:
+                                self.des_mysql_cur.execute('set sql_log_bin=0;')
+                            self.des_mysql_cur.execute('SET SESSION wait_timeout = 2147483;')
                         return True
                     except:
                         Logging(msg=traceback.format_exc(), level='error')

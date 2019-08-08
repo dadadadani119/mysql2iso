@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 ''' 
 @Time    : 2018/6/27 20:21
-@Author  : Great God
+@Author  : xiao cai niao
 @File    : InitCluster.py
 @Software: PyCharm
 '''
@@ -37,6 +37,8 @@ class ClusterEnt(HeartProtocol):
             del kwargs['zk_hosts']
         self.tasks = kwargs
 
+        self.server_port = kwargs['server_port']
+
     def __enter__(self):
         '''
         首先进行集群初始化，判断是否初次启动或宕机启动，如果宕机启动将获取cluster_status文件内容，判断是否有自己为leader的任务，
@@ -49,7 +51,7 @@ class ClusterEnt(HeartProtocol):
             p_ser.start()
             if p_ser.is_alive():
                 self.checkstatus()
-                print(self.global_status)
+                #print(self.global_status)
                 if self.global_status:
                     for _host in self.global_status:
                         if self.global_status[_host]['isself']:
@@ -66,7 +68,7 @@ class ClusterEnt(HeartProtocol):
                 Logging(msg='starting udp server failed',level='error')
                 sys.exit()
         elif self.cluster_type == 'zk_mode':
-            with ClusterOp(task_list=self.tasks,zk_hosts=self.zk_hosts) as cz:
+            with ClusterOp(task_list=self.tasks,zk_hosts=self.zk_hosts,port=self.server_port) as cz:
                 pass
 
 

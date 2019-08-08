@@ -1,6 +1,6 @@
 # -*- encoding: utf-8 -*-
 '''
-@author: Great God
+@author: xiao cai niao
 '''
 import queue
 import traceback
@@ -11,10 +11,10 @@ from .dump import Dump
 sys.path.append("..")
 from lib.Loging import Logging
 from lib.InitDB import InitMyDB
-from mode.phoenix.InitDB import InitDB as InitPhoenixDB
+
 
 class ThreadDump(threading.Thread):
-    def __init__(self, queue, dump_pro,chunk_list,database,table,idx,pri_idx,tbl,cols,bytes_col_list=None):
+    def __init__(self, queue, dump_pro,chunk_list,database,table,idx,pri_idx,tbl,cols,iso=None,bytes_col_list=None):
         threading.Thread.__init__(self)
         self.queue = queue
         self.dump_pro = dump_pro
@@ -25,11 +25,12 @@ class ThreadDump(threading.Thread):
         self.pri_idx = pri_idx
         self.tbl = tbl
         self.cols = cols
+        self.iso = iso
         self.bytes_col_list = bytes_col_list
     def run(self):
         try:
             __tuple_ = [self.database,self.table,self.idx,self.pri_idx,self.chunk_list,
-                        self.bytes_col_list,self.tbl,self.cols]
+                        self.bytes_col_list,self.tbl,self.cols,self.iso]
             self.dump_pro.dump_to_new_db(*__tuple_)
             self.queue.put('1001')
         except:
@@ -48,6 +49,9 @@ class processdump(Prepare):
         self._tmp_queal_struct = None
         self.jar,self.jar_conf = jar,jar_conf
         self.destination_type = destination_type
+        if self.destination_type == 'phoenix':
+            import phoenixdb.cursor
+            from mode.phoenix.InitDB import InitDB as InitPhoenixDB
         ''''''
 
         self.binlog = binlog
@@ -78,13 +82,17 @@ class processdump(Prepare):
                                                     host=self.des_conn_info['mysql_host'],
                                                     port=self.des_conn_info['mysql_port'],
                                                     jar=self.jar,jar_conf=self.jar_conf).Init()
-                self.des_mysql_cur = self.des_mysql_conn.cursor()
+                #self.des_mysql_cur = self.des_mysql_conn.cursor()
+                self.des_mysql_cur = self.des_mysql_conn.cursor(cursor_factory=phoenixdb.cursor.DictCursor)
             else:
-                self.des_mysql_conn = InitMyDB(**self.des_kwargs).Init()
+                self.des_mysql_conn = InitMyDB(**dict(self.des_kwargs,**{'type':self.destination_type})).Init()
                 self.des_mysql_cur = self.des_mysql_conn.cursor()
-                if self.binlog is None:
-                    self.des_mysql_cur.execute('set sql_log_bin=0')
-                self.des_mysql_cur.execute('SET SESSION wait_timeout = 2147483;')
+                if self.destination_type and self.destination_type != 'mysql':
+                    pass
+                else:
+                    if self.binlog is None:
+                        self.des_mysql_cur.execute('set sql_log_bin=0')
+                    self.des_mysql_cur.execute('SET SESSION wait_timeout = 2147483;')
             self.des_thread_list.append({'conn': self.des_mysql_conn, 'cur': self.des_mysql_cur})
             self.dump = Dump(cur=self.cur, des_conn=self.des_mysql_conn, des_cur=self.des_mysql_cur,
                              destination_type=self.destination_type,table_column_struct=self.table_column_struct,
@@ -106,12 +114,12 @@ class processdump(Prepare):
         for table in tables:
             state = self.__queal_table_check(database, table)
             if state:
-                tbl, cols = self.__queal_col_check(database, table)
-                _parmeter = [database, table, tbl, cols]
+                tbl, cols,iso = self.__queal_col_check(database, table)
+                _parmeter = [database, table, tbl, cols,iso]
                 if threads:
                     self.__mul_dump_go(*_parmeter)
                 else:
-                    self.__dump_go(database=database,tablename=table,tbl=tbl,cols=cols)
+                    self.__dump_go(database=database,tablename=table,tbl=tbl,cols=cols,iso=iso)
 
     def __queal_start(self,threads=None,database=None):
         if database in self._tmp_queal_struct:
@@ -151,9 +159,12 @@ class processdump(Prepare):
         tbl_info = db_struct[tablename]
         tbl = tbl_info['tbl']
         cols = None
+        iso = None
         if 'cols' in tbl_info:
             cols = tbl_info['cols']
-        return tbl,cols
+        if 'iso' in tbl_info:
+            iso = tbl_info['iso']
+        return tbl,cols,iso
 
     def start(self):
         '''
@@ -222,7 +233,7 @@ class processdump(Prepare):
                 self.close(thread['cur'], thread['conn'])
         return binlog_file,binlog_pos,excute_gtid
 
-    def __dump_go(self,database,tablename,idx_name=None,pri_idx=None,max_min=None,bytes_col_list=None,tbl=None,cols=None):
+    def __dump_go(self,database,tablename,idx_name=None,pri_idx=None,max_min=None,bytes_col_list=None,tbl=None,cols=None,iso=None):
         '''
         单线程导出函数
         :param database:
@@ -239,18 +250,18 @@ class processdump(Prepare):
                 bytes_col_list = self.check_byte_col(cur=self.cur, db=database, table=tablename)
                 max_min = self.split_data(
                     self.cur,self.get_max_min(cur=self.cur,databases=database,tables=tablename,index_name=idx_name),
-                    idx_name,database,tablename)
+                    idx_name,database,tablename,None)
             if max_min and max_min[0]:
                 dump = Dump(cur=self.cur, des_conn=self.des_mysql_conn, des_cur=self.des_mysql_cur,
                             destination_type=self.destination_type, table_column_struct=self.table_column_struct,
                             des_conn_info=self.des_conn_info, jar=self.jar, jar_conf=self.jar_conf, binlog=self.binlog)
                 dump.dump_to_new_db(database=database, tablename=tablename, idx=idx_name, pri_idx=pri_idx,
-                                     chunk_list=max_min,bytes_col_list=bytes_col_list,tbl=tbl,cols=cols)
+                                     chunk_list=max_min,bytes_col_list=bytes_col_list,tbl=tbl,cols=cols,iso=iso)
         else:
             Logging(msg='Initialization structure error', level='error')
             sys.exit()
 
-    def __mul_dump_go(self,database,tablename,tbl=None,cols=None):
+    def __mul_dump_go(self,database,tablename,tbl=None,cols=None,iso=None):
         '''
         多线程导出函数
         尽量选择合适的索引，通过索引值拆分每个线程数操作的值区间
@@ -286,7 +297,7 @@ class processdump(Prepare):
                                 des_cur=self.des_thread_list[t]['cur'],destination_type=self.destination_type,
                                 table_column_struct=self.table_column_struct,des_conn_info=self.des_conn_info,
                                 jar=self.jar,jar_conf=self.jar_conf,binlog=self.binlog)
-                    __dict_ = [self.queue, dump, chunks_list[t], database, tablename, idx_name, pri_idx,tbl,cols]
+                    __dict_ = [self.queue, dump, chunks_list[t], database, tablename, idx_name, pri_idx,tbl,cols,iso]
                     _t = ThreadDump(*__dict_)
                     _t.start()
                 self.__get_queue()

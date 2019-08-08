@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 ''' 
 @Time    : 2018/6/28 10:47
-@Author  : Great God
+@Author  : xiao cai niao
 @File    : ClusterHeart.py
 @Software: PyCharm
 '''
@@ -126,10 +126,10 @@ class zkheartbeat:
         '''创建临时node'''
         node_stat = self.zk.exists(path='/mysql2iso/' + self.task_name)
         if node_stat is None:
-            self.zk.create(path="/mysql2iso/" + self.task_name, value="", ephemeral=True)
+            self.zk.create(path="/mysql2iso/" + self.task_name, value=b"", ephemeral=True)
         else:
             self.zk.delete(path="/mysql2iso/" + self.task_name)
-            self.zk.create(path="/mysql2iso/" + self.task_name, value="", ephemeral=True)
+            self.zk.create(path="/mysql2iso/" + self.task_name, value=b"", ephemeral=True)
         self.retry_state = ''
 
     def run(self):

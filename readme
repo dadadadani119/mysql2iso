@@ -1,15 +1,16 @@
 #该工具可用于在先迁移库、表数据，也可用于多区域数据同步，可结合mysqldump或其他备份工具导出利用binlog同步的方式进行追加数据，也可以直接对表
-数据进行在线迁移，该工具基于python3及mysql5.7进行开发，可以用于学习及工作上的需求。
+数据进行在线迁移，该工具基于python3进行开发，可以用于学习及工作上的需求。
 
 ##功能：
     1、通过binlog追加dml数据目标库
-    2、可过滤性，包括库、表、线程ID、操作类型
+    2、可过滤性，包括库、表、线程ID、操作类型(不同表可以有不同的过滤类型)
     2、记录同步状态，支持断点续传
     3、支持在线导出表，可多线程/单线程
-    4、支持集群模式，可选基于zookeeper或leader选举模式(开发中)
+    4、支持集群模式，基于zookeeper服务注册
     5、多节点/区域同步支持回环控制
     6、基于库、表为单位并发入库
-    7、可用于mysql之间的同构/异构，以及mysql到phonix的同构/异构数据同步
+    7、可用于mysql之间的同构/异构，以及mysql到phonix/postgresql的同构/异构数据同步
+    8、支持单独定义某个表的过滤属性
 
 ##使用参考：
     1、首先从github获取到程序
@@ -102,7 +103,6 @@
     14、如果开启异构同步，最终入库关系由异构配置文件配置的内容控制，如果在配置文件中同步db1，但在异构配置中未配置db1的相关项
     将不会对db1的数据进行操作
 
-##python依赖包：
-   pip install pymysql struct IPy kazoo numpy jaydebeapi
+##python所有依赖包(不同的目标库需求不同)：
+   pip install pymysql struct IPy kazoo numpy jaydebeapi psycopg2 phoenixdb
 
-####如有疑问可加qq群：479472450

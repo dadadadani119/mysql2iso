@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 ''' 
 @Time    : 2018/7/25 13:44
-@Author  : Great God
+@Author  : xiao cai niao
 @File    : SingeTask.py
 @Software: PyCharm
 '''
@@ -11,15 +11,17 @@ import sys,time
 from multiprocessing import Queue
 from lib.Loging import Logging
 
-
 my_queue = Queue(2048)
+
 
 class SingeTask:
     def __init__(self,**kwargs):
         self.kwargs = kwargs
+        #self.server_port = kwargs['server_port']
         self.thread_list = []   #同步及追加线程
 
     def __enter__(self):
+
         # 源库同步线程
         task_p = ThreadDump(type='repl',_argv=dict(self.kwargs, **{'queue': my_queue}))
         task_p.start()
@@ -47,3 +49,8 @@ class SingeTask:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
+
+
+
+
+

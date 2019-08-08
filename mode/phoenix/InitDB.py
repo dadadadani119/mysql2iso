@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 ''' 
 @Time    : 2018/8/15 11:17
-@Author  : Great God
+@Author  : xiao cai niao
 @File    : InitDB.py
 @Software: PyCharm
 '''
 import sys,traceback
-import jaydebeapi as jdbc
+import phoenixdb
 sys.path.append("..")
 from lib.Loging import Logging
 
@@ -21,10 +21,8 @@ class InitDB:
 
     def Init(self):
         try:
-            conn = jdbc.connect('org.apache.phoenix.jdbc.PhoenixDriver',
-                         'jdbc:phoenix:{}:{}'.format(self.host,self.port),
-                         dict(self.jar_conf,**{'username':self.user,'password':self.passwd}),
-                                ['{}'.format(self.jar)])
+            database_url = 'http://{}:{}/'.format(self.host,self.port)
+            conn = phoenixdb.connect(database_url, autocommit=True)
             return conn
         except:
             Logging(msg=traceback.format_exc(),level='error')

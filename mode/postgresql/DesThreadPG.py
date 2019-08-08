@@ -7,12 +7,13 @@
 '''
 
 import sys,pymysql,traceback,time
+import psycopg2
 sys.path.append("..")
 from lib.ErrorCode import ErrorCode
 from lib.ErrorCode import RetryErrorCode
 from lib.Loging import Logging
 from lib.InitDB import InitMyDB
-from .GetSql import GetSql
+from .GetPGSql import GetSql
 
 class desthread(GetSql):
     def __init__(self, **kwargs):
@@ -27,14 +28,14 @@ class desthread(GetSql):
         self.table_struct_list = kwargs['table_struct_list']
         self.table_pk_idex_list = kwargs['table_pk_idex_list']
         self.thread_id = kwargs['thread_id']
+        self.server_id = kwargs['server_id']
 
         self.queue = kwargs['queue']
         self.dhost, self.dport, self.duser, self.dpasswd = kwargs['dhost'], kwargs['dport'], kwargs['duser'], kwargs['dpassword']  # 目标库连接相关信息
-        self.binlog = kwargs['binlog']  # 是否在目标库记录binlog的参数
+        #self.binlog = kwargs['binlog']  # 是否在目标库记录binlog的参数
 
         self.destination_conn = None
         self.destination_cur = None
-        self.server_id = kwargs['server_id']
 
         self.trancaction_list = []  # 已执行的事务sql,用于重连之后重新执行
         self.queue_list = []        #队列列表，一个队列对应一个线程,[queue1,queue2]
@@ -54,12 +55,12 @@ class desthread(GetSql):
         for i in range(60):
             try:
                 self.destination_conn = InitMyDB(mysql_host=self.dhost, mysql_port=self.dport, mysql_user=self.duser,
-                                                 mysql_password=self.dpasswd, auto_commit=False).Init()
+                                                 mysql_password=self.dpasswd, auto_commit=False,type='postgresql').Init()
                 self.destination_cur = self.destination_conn.cursor()
 
-                if self.binlog is None:
-                    self.destination_cur.execute('set sql_log_bin=0;')  # 设置binlog参数
-                self.destination_cur.execute('SET SESSION wait_timeout = 2147483;')
+                # if self.binlog is None:
+                #     self.destination_cur.execute('set sql_log_bin=0;')  # 设置binlog参数
+                # self.destination_cur.execute('SET SESSION wait_timeout = 2147483;')
                 break
             except pymysql.Error as e:
                 Logging(msg=e.args,level='error')
@@ -118,7 +119,42 @@ class desthread(GetSql):
             Logging(msg='sql:{},values:{}'.format(sql, args), level='error')
             Logging(msg=traceback.format_exc(), level='error')
             return None
-
+        except psycopg2.OperationalError as e:
+            Logging(msg='sql:{},values:{}'.format(sql, args), level='error')
+            Logging(msg=traceback.format_exc(), level='error')
+            if sql == 'commit':
+                self.__retry_execute(retry=retry)
+                return True
+            else:
+                self.__retry_execute(sql=sql, args=args, retry=retry, type=type)
+                return True
+            return None
+        except psycopg2.IntegrityError as e:
+            Logging(msg='{}'.format(e), level='error')
+            Logging(msg='sql:{},values:{}'.format(sql, args), level='error')
+            sql = sql.replace('INSERT','UPSERT')
+            Logging(msg='replace insert to upsert', level='info')
+            self.trancaction_list[-1] = [sql,args]
+            self.__retry_execute(sql=sql, args=args, retry=retry, type=type)
+            return True
+        except psycopg2.InterfaceError as e:
+            Logging(msg=e.args, level='error')
+            if sql == 'commit':
+                self.__retry_execute(retry=retry)
+            else:
+                self.__retry_execute(sql=sql,args=args,retry=retry)
+            return True
+        except psycopg2.DatabaseError as e:
+            Logging(msg=e.args, level='error')
+            if sql == 'commit':
+                self.__retry_execute(retry=retry)
+            else:
+                self.__retry_execute(sql=sql, args=args, retry=retry)
+            return True
+        except psycopg2.extensions.TransactionRollbackError as e:
+            Logging(msg='{}'.format(e), level='error')
+            self.__retry_execute(sql=sql, args=args, retry=retry, type=type)
+            return True
         except:
             Logging(msg='sql:{},values:{}'.format(sql, args), level='error')
             Logging(msg=traceback.format_exc(), level='error')
@@ -190,12 +226,12 @@ class desthread(GetSql):
             try:
                 self.destination_conn = InitMyDB(mysql_host=self.dhost, mysql_port=self.dport,
                                                  mysql_user=self.duser,
-                                                 mysql_password=self.dpasswd, auto_commit=False).Init()
+                                                 mysql_password=self.dpasswd, auto_commit=False,type='postgresql').Init()
                 self.destination_cur = self.destination_conn.cursor()
                 Logging(msg='connection success!!!', level='info')
-                if self.binlog is None:
-                    self.destination_cur.execute('set sql_log_bin=0;')  # 设置binlog参数
-                self.destination_cur.execute('SET SESSION wait_timeout = 2147483;')
+                # if self.binlog is None:
+                #     self.destination_cur.execute('set sql_log_bin=0;')  # 设置binlog参数
+                # self.destination_cur.execute('SET SESSION wait_timeout = 2147483;')
                 return True
             except:
                 Logging(msg=traceback.format_exc(), level='error')
@@ -234,9 +270,9 @@ class desthread(GetSql):
         :param at_pos:
         :return:
         '''
-        _name = '{}:{}:{}'.format(db_name, tbl_name, self.server_id)
+        _name = '{}:{}:{}'.format(db_name,tbl_name,self.server_id)
         if _name in self.status_row:
-            sql = 'UPDATE repl_mark.mark_status SET gno_uid=%s,gno_id=%s,at_pos=%s,binlog=%s where db_name=%s and tbl_name=%s and server_id = %s;'
+            sql = 'UPDATE repl_mark.mark_status SET gno_uid=%s,gno_id=%s,at_pos=%s,binlog=%s where db_name=%s and tbl_name=%s and server_id=%s;'
             args = [gtid, gno_id, at_pos,binlog,db_name,tbl_name,self.server_id]
         else:
             sql = 'select 1 from repl_mark.mark_status where  db_name = %s and tbl_name = %s and server_id=%s;'
@@ -266,7 +302,7 @@ class desthread(GetSql):
         result = self.destination_cur.fetchall()
         fetch_value = {}
         for row in result:
-            fetch_value['{}:{}:{}'.format(row['db_name'],row['tbl_name'],row['server_id'])] = [row['gno_uid'],row['gno_id'],row['at_pos'],row['binlog']]
+            fetch_value['{}:{}:{}'.format(row[0],row[1],row[6])] = [row[2],row[3],row[5],row[4]]
         return fetch_value
 
     def __check_lock(self,db_tbl_name,lock_state=None):
@@ -313,7 +349,7 @@ class desthread(GetSql):
                             db_name,tbl_name = value_list[1],value_list[2]
                             gno_uid,gno_id,binlog,at_pos = trancaction['gno_uid'],trancaction['gno_id'],trancaction['binlog'],value_list[3]
 
-                            db_tbl_name_serverid = '{}:{}'.format(db_tbl_name, self.server_id)
+                            db_tbl_name_serverid = '{}:{}'.format(db_tbl_name,self.server_id)
                             if db_tbl_name_serverid in fetch_value:
                                 _state = self.__fetch_check(fetch_value[db_tbl_name_serverid],gno_uid,gno_id,at_pos,binlog)
                                 if _state:
@@ -333,6 +369,12 @@ class desthread(GetSql):
                                 for sql in sql_list:
                                     self.trancaction_list.append([sql[0], sql[1]])
                                     self.__check_stat(self.__raise_sql(sql=sql[0], args=sql[1]))
+                                    if len(self.trancaction_list) >= 2000:
+                                        '''2000条提交一次'''
+                                        self.__set_mark(db_name=db_name, tbl_name=tbl_name, gtid=gno_uid, gno_id=gno_id,
+                                                        at_pos=at_pos, binlog=binlog)
+                                        self.__raise_sql('commit', retry=True)
+                                        self.trancaction_list = []
                     if __mark_status:
                         self.__set_mark(db_name=db_name, tbl_name=tbl_name, gtid=gno_uid, gno_id=gno_id, at_pos=at_pos,binlog=binlog)
                     self.__raise_sql('commit',retry=True)
@@ -340,8 +382,6 @@ class desthread(GetSql):
                     self.trancaction_list = []
                     __mark_status = None
                     self.thread_lock_queue[db_tbl_name].pop(0)
-            else:
-                time.sleep(0.01)
 
 
     def __fetch_check(self,fetch,gno_uid,gno_id,at_pos,binlog):

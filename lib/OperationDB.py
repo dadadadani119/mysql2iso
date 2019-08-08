@@ -1,6 +1,6 @@
 # -*- encoding: utf-8 -*-
 '''
-@author: Great God
+@author: xiao cai niao
 '''
 import sys,pymysql,traceback
 import json,time
@@ -78,8 +78,10 @@ class OperationDB(escape):
         self.gtid = kwargs['gtid']
 
         self.ithread = kwargs['ithread']
-        self.ignore_type = kwargs['ignore_type']
+        self.ignore_type = kwargs['ignore_type'] if kwargs['ignore_type'] else []
         self.ignore = {'delete':binlog_events.DELETE_ROWS_EVENT,'update':binlog_events.UPDATE_ROWS_EVENT,'insert':binlog_events.WRITE_ROWS_EVENT}
+        if self.ignore_type:
+            self.ignore_code = [self.ignore[a] for a in self.ignore if a in self.ignore_type]
         self.server_id = kwargs['server_id']
 
         self.shost = kwargs['shost']
@@ -88,6 +90,9 @@ class OperationDB(escape):
         self.spassword = kwargs['spassword']
         self.sbinlog = kwargs['sbinlog']
 
+        #----单独过滤配置
+        self.ignores = kwargs['ignores']
+        self.check_att = None                           #判断是否为附加任务的表
 
     def __init_master_slave_conn(self):
         '''
@@ -112,32 +117,67 @@ class OperationDB(escape):
     def __init_status_conn(self):
 
         self._status_conn = GetStruct(host=self.shost, port=self.sport, user=self.suser, passwd=self.spassword,
-                                      binlog=self.sbinlog)  # 状态库链接类初始化
+                                      binlog=self.sbinlog,server_id=self.server_id)  # 状态库链接类初始化
         self._status_conn.CreateTmp()
 
     def __execute_code(self,_parse_event,event_code,event_length,table_struce_key):
         '''
-        在此需要对库、表进行再次判断，因为在一个GTID中可能有包含非需要的库表操作，这样会时mark标签失效
+        在此需要对库、表进行再次判断，因为在一个GTID中可能有包含非需要的库表操作，这样会使mark标签失效
         :param _parse_event:
         :param event_code:
         :param event_length:
         :param table_struce_key:
         :return:
         '''
-        if tmepdata.database_name in self.databases:
-            if self.tables:
-                if tmepdata.table_name in self.tables:
-                    _values = _parse_event.GetValue(type_code=event_code, event_length=event_length,
-                                        cloums_type_id_list=tmepdata.cloums_type_id_list,
-                                        metadata_dict=tmepdata.metadata_dict,
-                                        unsigned_list=self.__check_struce(table_struce_key))
-                    tmepdata.sql_list.append([_values,tmepdata.database_name,tmepdata.table_name,self.at_pos,event_code])
-            else:
-                _values = _parse_event.GetValue(type_code=event_code, event_length=event_length,
-                                                cloums_type_id_list=tmepdata.cloums_type_id_list,
-                                                metadata_dict=tmepdata.metadata_dict,
-                                                unsigned_list=self.__check_struce(table_struce_key))
-                tmepdata.sql_list.append([_values, tmepdata.database_name, tmepdata.table_name, self.at_pos,event_code])
+
+        _values = _parse_event.GetValue(type_code=event_code, event_length=event_length,
+                            cloums_type_id_list=tmepdata.cloums_type_id_list,
+                            metadata_dict=tmepdata.metadata_dict,
+                            unsigned_list=self.__check_struce(table_struce_key))
+        tmepdata.sql_list.append([_values,tmepdata.database_name,tmepdata.table_name,self.at_pos,event_code])
+
+        # if tmepdata.database_name in self.databases:
+        #     if self.tables:
+        #         if tmepdata.table_name in self.tables:
+        #             _values = _parse_event.GetValue(type_code=event_code, event_length=event_length,
+        #                                 cloums_type_id_list=tmepdata.cloums_type_id_list,
+        #                                 metadata_dict=tmepdata.metadata_dict,
+        #                                 unsigned_list=self.__check_struce(table_struce_key))
+        #             tmepdata.sql_list.append([_values,tmepdata.database_name,tmepdata.table_name,self.at_pos,event_code])
+        #     else:
+        #         _values = _parse_event.GetValue(type_code=event_code, event_length=event_length,
+        #                                         cloums_type_id_list=tmepdata.cloums_type_id_list,
+        #                                         metadata_dict=tmepdata.metadata_dict,
+        #                                         unsigned_list=self.__check_struce(table_struce_key))
+        #         tmepdata.sql_list.append([_values, tmepdata.database_name, tmepdata.table_name, self.at_pos,event_code])
+
+    def __check_att_status(self,event_code=None,status_check=None):
+        '''
+        判断附加任务表
+        :param event_code:
+        :return:
+        '''
+
+        if status_check:
+            for row in self.ignores:
+                _db, _tb_list = row[0], row[1]
+                if tmepdata.database_name == _db and tmepdata.table_name in _tb_list:
+                    if self.repl_mark_status is None:
+                        self.repl_mark_status = True
+                    if self.check_att is None:
+                        self.check_att = True
+                    return True
+            return False
+        elif event_code:
+            for row in self.ignores:
+                _db, _tb_list = row[0], row[1]
+                _ignore_code = [self.ignore[i] for i in row[2] if i in self.ignore]
+                if tmepdata.database_name == _db and tmepdata.table_name in _tb_list:
+                    if event_code in _ignore_code:
+                        return True
+                    return False
+
+
 
     def __check_struce(self,table_struce_key):
         if table_struce_key in tmepdata.table_struct_type_list:
@@ -146,10 +186,62 @@ class OperationDB(escape):
             Logging(msg='this struce name {} not in table_struct_type_list'.format(table_struce_key),level='error')
             sys.exit()
 
+    # def __check_att_repl_info(self,_binlog_file,_binlog_pos,_excute_gtid):
+    #     '''
+    #     对合并进行判断
+    #     :param _binlog_file:
+    #     :param _binlog_pos:
+    #     :param _excute_gtid:
+    #     :return:
+    #     '''
+    #
+    #     if self.att_info:
+    #         server_uuid = self.__get_server_uuid()
+    #         _excute_gtid_dict = {}
+    #         for uuid_gnoid in _excute_gtid.split(','):
+    #             _ = uuid_gnoid.split(':')
+    #             _excute_gtid_dict[_[0]] = _[1]
+    #
+    #         _att_gtid_dict = {}
+    #         for att_uuid_gnoid in self.att_gtid.split(','):
+    #             _ = att_uuid_gnoid.split(':')
+    #             _att_gtid_dict[_[0]] = _[1]
+    #
+    #         if server_uuid in _excute_gtid_dict and server_uuid in _att_gtid_dict:
+    #             _excuet_gnoid = _excute_gtid_dict[server_uuid].split('-')
+    #             _att_gnoid = _excute_gtid_dict[server_uuid].split('-')
+    #             if _excuet_gnoid[0] == _att_gnoid[0]:
+    #                 if _excuet_gnoid[1] > _att_gnoid[1]:
+    #                     _excute_gtid = self.att_gtid
+    #             elif _excuet_gnoid[0] > _att_gnoid[0]:
+    #                 _excute_gtid = self.att_gtid
+    #         else:
+    #             Logging(msg='att_gtid:{} is invalid'.format(self.att_gtid), level='error')
+    #             sys.exit()
+    #     elif self.att_binlog and self.att_pos:
+    #         _att_binlog_file = int(self.att_binlog.split('.')[1])
+    #         _excute_binlog_file = int(_binlog_file.split('.')[1])
+    #         if _att_binlog_file == _excute_binlog_file:
+    #             if int(self.att_pos) < int(_binlog_pos):
+    #                 _binlog_pos = self.att_pos
+    #         elif _att_binlog_file < _excute_binlog_file:
+    #             _binlog_file, _binlog_pos = self.att_binlog, self.att_pos
+    #
+    #     return _binlog_file,_binlog_pos,_excute_gtid
+
+
     def Operation(self):
         '''
         :return:
         '''
+
+        self.__init_status_conn()  # 初始化状态库
+        if not self.daemon:
+            if self._status_conn.checkserverid():
+                pass
+            else:
+                Logging(msg='this server_id already exists in dump2db.dump_status. to ensure uniqueness, please confirm whether it has been abandoned.',level='error')
+                sys.exit()
 
         '''全量导出入口'''
         if self.daemon:
@@ -164,6 +256,7 @@ class OperationDB(escape):
                                                                 map_conf=self.map_conf,queal_struct=self.queal_struct,
                                                                 destination_type=self.destnation_type,jar=self.jar,
                                                                 jar_conf=self.jar_conf).start()
+
             if _binlog_file is None or _binlog_pos is None:
                 sys.exit()
         '''============================================================================================================'''
@@ -178,12 +271,10 @@ class OperationDB(escape):
         self.queue.put({'table_struct': [tmepdata.table_struct_list, tmepdata.table_pk_idex_list]})
 
         if self.daemon:
-            self.__init_status_conn()  # 初始化状态库
             _binlog_file, _binlog_pos, _excute_gtid ,gtid_uid = self._status_conn.get_daemon_info(self.server_id)
             self._status_conn.close()
             _excute_gtid = ','.join(['{}:{}'.format(uuid, _excute_gtid[uuid]) for uuid in _excute_gtid])
         Logging(msg='replication to master.............', level='info')
-
 
         if self.daemon or self.full_dump:
             self.cur.close()
@@ -208,12 +299,8 @@ class OperationDB(escape):
         '''============================================================================================================'''
 
         table_struce_key = None
-        binlog_file_name = _binlog_file if self.full_dump else self.binlog_file
-
-
-
-
-        next_pos = _binlog_pos if self.full_dump else self.start_position #开始读取的binlog位置
+        binlog_file_name = _binlog_file if self.full_dump or self.daemon else self.binlog_file
+        next_pos = _binlog_pos if self.full_dump or self.daemon else self.start_position #开始读取的binlog位置
 
         if ReplConn:
             Logging(msg='replication succeed................', level='info')
@@ -235,6 +322,20 @@ class OperationDB(escape):
                     Logging(msg='retry to regist master', level='error')
                     ReplConn = self.__retry_regist_master(gtid=tmepdata.excute_gtid, binlog=binlog_file_name,
                                                           position=self.at_pos)
+                    continue
+                except pymysql.Error as e:
+                    Logging(msg=e.args,level='error')
+                    if e.args[0] == 1236:
+                        '''gtid被清理的情况下重新获取'''
+                        if tmepdata.excute_gtid:
+                            pass
+                        else:
+                            tmepdata.excute_gtid = _gtid.copy()
+                        self.__get_gtid_info()
+                        Logging(msg='retry to regist master', level='error')
+                        ReplConn = self.__retry_regist_master(gtid=tmepdata.excute_gtid, binlog=binlog_file_name,
+                                                              position=self.at_pos)
+                        continue
                 except:
                     Logging(msg=traceback.format_exc(), level='error')
                     ReplConn.close()
@@ -255,13 +356,24 @@ class OperationDB(escape):
                         if self.ithread:
                             if self.ithread == tmepdata.thread_id:
                                 continue
-                            if self.ignore_type and self.ignore[self.ignore_type] == event_code:
-                                continue
+
+                            if self.check_att:
+                                if self.__check_att_status(event_code=event_code):
+                                    continue
+                            #if self.ignore_type and self.ignore[self.ignore_type] == event_code:
+                            else:
+                                if self.ignore_type and event_code in self.ignore_code:
+                                    continue
                             self.__execute_code(_parse_event=_parse_event,event_code=event_code,
                                                     event_length=event_length,table_struce_key=table_struce_key)
                         else:
-                            if self.ignore_type and self.ignore[self.ignore_type] == event_code:
-                                continue
+                            if self.check_att:
+                                if self.__check_att_status(event_code=event_code):
+                                    continue
+                            #if self.ignore_type and self.ignore[self.ignore_type] == event_code:
+                            else:
+                                if self.ignore_type and event_code in self.ignore_code:
+                                    continue
                             self.__execute_code(_parse_event=_parse_event, event_code=event_code,
                                                     event_length=event_length, table_struce_key=table_struce_key)
 
@@ -276,22 +388,41 @@ class OperationDB(escape):
                     '''
                     tmepdata.database_name, tmepdata.table_name, tmepdata.cloums_type_id_list, tmepdata.metadata_dict=_parse_event.GetValue(type_code=event_code,event_length=event_length)  # 获取event数据
                     table_struce_key = '{}:{}'.format(tmepdata.database_name, tmepdata.table_name)
-                    if self.repl_mark:
-                        continue
-                    elif tmepdata.database_name == 'repl_mark':
-                        self.repl_mark = True
-                    elif tmepdata.database_name in self.databases:
+                    if self.lookback:
+                        if self.repl_mark:
+                            continue
+                        elif tmepdata.database_name == 'repl_mark':
+                            self.repl_mark = True
+                            continue
+                    if self.ignores:
+                        if self.__check_att_status(status_check=True):
+                            continue
+                    if tmepdata.database_name in self.databases:
                         if self.tables:
                             if tmepdata.table_name in self.tables:
                                 '''写入标签'''
                                 if self.repl_mark_status is None:
                                     #self.__set_mark()
                                     self.repl_mark_status = True
+                                    continue
+                                else:
+                                    continue
                         else:
                             '''写入标签'''
                             if self.repl_mark_status is None:
                                 #self.__set_mark()
                                 self.repl_mark_status = True
+                                continue
+                            else:
+                                continue
+
+
+                    '''不为需求库，把状态变量设置为None'''
+                    if self.repl_mark_status:
+                        self.repl_mark_status = None
+                    if self.check_att:
+                        self.check_att = None
+
 
                 elif event_code == binlog_events.ROTATE_EVENT:
                         binlog_file_name = _parse_event.read_rotate_log_event(event_length=event_length)
@@ -308,7 +439,7 @@ class OperationDB(escape):
                     self.gno_uid,self.gno_id = _parse_event.read_gtid_event(event_length=event_length)
                     _gtid[self.gno_uid] = '1-{}'.format(self.gno_id)
 
-                elif event_code == binlog_events.XID_EVENT:
+                elif event_code in (binlog_events.XID_EVENT,binlog_events.XA_PREPARE_LOG_EVENT):
                     '''
                     xid_event是整个gtid事务结束的标志
                     在此做所有事务的提交操作
@@ -326,6 +457,7 @@ class OperationDB(escape):
                         self.xa = None
                         self.repl_mark_status = None
                         self.repl_mark = None
+                        self.check_att = None
                         continue
                     else:
                         Logging(msg='the binlog queue is full !!!!!',level='error')
@@ -369,6 +501,17 @@ class OperationDB(escape):
                         tmepdata.table_struct_list[table_struce_key], tmepdata.table_pk_idex_list[table_struce_key],\
                         tmepdata.table_struct_type_list[table_struce_key] = self.__getcolumn(table_schema, table_name)
 
+                if self.ignores:
+                    for _r in self.ignores:
+                        db_name, tb_list = _r[0],_r[1]
+                        if db_name == table_schema:
+                            for _tb in tb_list:
+                                _tble_struce_key = '{}:{}'.format(db_name,_tb)
+                                if _tble_struce_key not in tmepdata.table_struct_list:
+                                    tmepdata.table_struct_list[_tble_struce_key], \
+                                    tmepdata.table_pk_idex_list[_tble_struce_key],\
+                                    tmepdata.table_struct_type_list[_tble_struce_key] = self.__getcolumn(db_name,_tb)
+
 
     def __getcolumn(self,*args):
         '''args顺序 database、tablename'''
@@ -395,7 +538,9 @@ class OperationDB(escape):
         获取当前位置进行同步
         :return:
         '''
-        if all([self.binlog_file,self.start_position,self.gtid]):
+        if all([self.binlog_file,self.start_position]):
+            pass
+        elif self.gtid:
             pass
         else:
             sql = 'show master status'
@@ -403,6 +548,16 @@ class OperationDB(escape):
             result = self.cur.fetchall()
             _re = result[0]
             self.binlog_file,self.start_position,self.gtid= _re['File'],_re['Position'],str(_re['Executed_Gtid_Set']).replace('\n','')
+
+    def __get_server_uuid(self):
+        '''
+        获取愿库当前节点的server_uuid
+        :return:
+        '''
+        sql = 'select @@server_uuid as server_uuid;'
+        self.__check_stat(self.__raise_sql(sql=sql))
+        result = self.cur.fetchall()
+        return result[0]['server_uuid']
 
 
     def __gtid_set(self,gtid):
@@ -438,6 +593,7 @@ class OperationDB(escape):
                     rep_info = {'log_file': binlog, 'log_pos': position, 'mysql_connection': self.conn,
                                 'server_id': self.server_id, 'auto_position': self.auto_position, 'gtid': gtid}
                     try:
+                        Logging(msg='binlog: {} position: {} gtid : {}'.format(binlog, position,gtid),level='info')
                         ReplConn = ReplicationMysql(**rep_info).ReadPack()
                     except pymysql.Error as e:
                         Logging(msg=traceback.format_exc(),level='error')
@@ -449,6 +605,38 @@ class OperationDB(escape):
                 Logging(msg=traceback.format_list(),level='error')
 
             time.sleep(1)
+
+    def __get_gtid_info(self):
+        '''
+        在主从切换之后可能被调用，发生调用的原因
+        1、运行一段时间slave的gtid被清理，但同步程序并没有获取过slave的gtid，因此在切换之后gtid会不一致
+        2、如果新master是该程序运行途中加入集群，该程序初始化并未保存到该gtid信息，需要获取
+        '''
+        for i in range(10):
+            try:
+                conn = InitMyDB(mysql_host=self.host, mysql_port=self.port, mysql_user=self.user,
+                                             mysql_password=self.passwd, unix_socket=self.unix_socket,ssl=self.ssl_auth).Init()
+                cur = conn.cursor()
+                cur.execute('select @@gtid_purged as purged;')
+                gtid_purged = cur.fetchall()[0]['purged']
+                gtid_purged = gtid_purged.split(',')
+                for gtid in gtid_purged:
+                    _gtid = gtid.replace('\n','').split(':')
+                    if _gtid[0] in tmepdata.excute_gtid:
+                        _e_noid = tmepdata.excute_gtid[_gtid[0]].split('-')[-1]
+                        _noid = _gtid[-1].split('-')[-1]
+                        if int(_e_noid) < int(_noid):
+                            tmepdata.excute_gtid[_gtid[0]] = _gtid[-1]
+                    else:
+                        tmepdata.excute_gtid[_gtid[0]] = _gtid[-1]
+                return True
+            except pymysql.Error as e:
+                Logging(msg=e.args,level='error')
+            time.sleep(1)
+        else:
+            Logging(msg='get gtid purged info is failed!!!!',level='error')
+            return None
+
 
     def __raise_sql(self, sql, args=[]):
         '''

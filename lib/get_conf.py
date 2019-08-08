@@ -1,6 +1,6 @@
 # -*- encoding: utf-8 -*-
 '''
-@author: Great God
+@author: xiao cai niao
 '''
 
 
@@ -18,8 +18,10 @@ class GetConf(object):
         self.source = 'source'
         self.destination = 'destination'
         self.status = 'status'
+        self.attach = 'attach'
         self.conf = configparser.ConfigParser()
         self.conf.read(conf_path,encoding="utf-8-sig")
+
 
     def GetGlobal(self):
         '''
@@ -30,7 +32,7 @@ class GetConf(object):
             'server_id':133,                #slave线程serverid
             'full':False,                   #是否全量导出
             'threads':1,                    #全量到处时线程数
-            'ignore':False,                 #过滤操作，可选[delete,insert,update]
+            'ignore':[],                 #过滤操作，可选[delete,insert,update]
             'ignore_thread':False,          #过滤线程ID产生的binlog
             'ssl':False,                    #ssl链接
             'cert':None,
@@ -54,6 +56,8 @@ class GetConf(object):
                         options_conf[option] = option_value
                     else:
                         Logging(msg='invalid option {} ,useing default config'.format(option), level='warning')
+                elif option == 'ignore':
+                    options_conf[option] = option_value.split(',') if option_value else []
                 else:
                     options_conf[option] = option_value if option_value else None
             else:
@@ -68,7 +72,7 @@ class GetConf(object):
         options_conf = {
             'host' : '127.0.0.1',               #源库地址
             'port' : 3306,                      #源库端口，默认3306
-            'socket' : None,                    #本地时使用socket链接
+            'protocol' : None,                    #本地时使用socket链接
             'user_name' : None,                 #源库用户名
             'user_password' : None,             #源库密码
             'databases' : None,                 #源库需要同步的数据库列表
@@ -131,7 +135,8 @@ class GetConf(object):
             else:
                 Logging(msg='invalid option {}'.format(option), level='warning')
 
-        if options_conf['dhost'] is None or options_conf['duser'] is None or options_conf['dpassword'] is None:
+        #if options_conf['dhost'] is None or options_conf['duser'] is None or options_conf['dpassword'] is None:
+        if options_conf['dhost'] is None or options_conf['duser'] is None:
             Logging(msg='{} cannot is null'.format('dhost/duser/dpassword'), level='error')
             sys.exit()
 
@@ -168,6 +173,23 @@ class GetConf(object):
 
         return options_conf
 
+    def GetAttact(self):
+        '''
+        获取附加项配置
+        :return:
+        '''
+        options_conf = {
+            'ignores' : None                      #针对单独的库/表过滤操作
+        }
+        att_opptions = self.conf.options(self.attach)
+        for option in att_opptions:
+            if option in options_conf:
+                options_conf[option] = self.conf.get(self.attach,option)
+            else:
+                Logging(msg='invalid option {}'.format(option), level='warning')
+        return options_conf
+
+
 class GetIso:
     def __init__(self):
         conf_path = path.replace('\\', '/') + '/conf/iso.conf'
@@ -187,6 +209,7 @@ class GetIso:
             'cluster_type' : 'zk_mode',         #集群模式类型,默认基于zk实现
             'cluster_nodes' : None,             #集群模式下配置的节点信息
             'zk_hosts' : None,                  #zk集群模式下需要的集群地址
+            'server_port': 9898,                 #服务监听端口
             'host' : None                       #本机IP
         }
 
@@ -196,6 +219,8 @@ class GetIso:
                 option_value = self.conf.get(self.options,option)
                 if option == 'cluster':
                     option_conf['cluster'] = True if option_value == 'True' else False
+                elif option == 'server_port':
+                    option_conf['server_port'] = int(option_value)
                 else:
                     option_conf[option] = option_value
             else:

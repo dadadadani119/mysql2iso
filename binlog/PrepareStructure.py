@@ -1,6 +1,6 @@
 # -*- encoding: utf-8 -*-
 '''
-@author: Great God
+@author: xiao cai niao
 '''
 
 import sys
@@ -12,7 +12,7 @@ from lib.Loging import Logging
 from lib.ErrorCode import ErrorCode
 
 class GetStruct:
-    def __init__(self,host=None,port=None,user=None,passwd=None,socket=None,binlog=None):
+    def __init__(self,host=None,port=None,user=None,passwd=None,socket=None,binlog=None,server_id=None):
         self.host = host
         self.port = port
         self.user = user
@@ -25,6 +25,7 @@ class GetStruct:
         self.__init_status()
 
         self.apply_conn = None
+        self.server_id =server_id
 
         self.insert_sql_list = []
 
@@ -53,7 +54,10 @@ class GetStruct:
         self.__raise('CREATE DATABASE IF NOT EXISTS dump2db;')                                                                      #创建临时库
         #self.__raise('DROP TABLE IF EXISTS dump2db.dump_status;')
         self.__raise('CREATE TABLE IF NOT EXISTS dump2db.dump_status(id INT,excute_gtid json,logname VARCHAR(100),'
-                     'at_pos BIGINT,next_pos BIGINT,gtid_uid varchar(64),PRIMARY KEY(id));')    #创建临时表
+                     'at_pos BIGINT,next_pos BIGINT,gtid_uid varchar(64),'
+                     'create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,'
+                     'update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,'
+                     'PRIMARY KEY(id));')    #创建临时表
 
     def SaveStatus(self,logname,at_pos,next_pos,server_id,gtid=None,apply_conn=None,gno_uid=None):
         if apply_conn:
@@ -74,6 +78,18 @@ class GetStruct:
     def close(self):
         self.cur.close()
         self.connection.close()
+
+    def checkserverid(self):
+        '''
+        检查server_id重复性，如果已经有在使用的server_id,而且启动的非daemon模式将直接退出
+        :return:
+        '''
+        sql = 'select 1 from dump2db.dump_status where id = %s'
+        self.__raise(sql=sql,args=self.server_id)
+        result = self.cur.fetchall()
+        if result:
+            return False
+        return True
 
     def __raise(self,sql,args=None):
         '''

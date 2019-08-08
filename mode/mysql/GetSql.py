@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 ''' 
 @Time    : 2018/8/13 15:33
-@Author  : Great God
+@Author  : xiao cai niao
 @File    : GetPhoenixSql.py
 @Software: PyCharm
 '''

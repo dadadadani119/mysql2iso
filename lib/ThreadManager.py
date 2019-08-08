@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 ''' 
 @Time    : 2018/7/25 13:33
-@Author  : Great God
+@Author  : xiao cai niao
 @File    : ThreadManager.py
 @Software: PyCharm
 '''
@@ -9,7 +9,10 @@ import time
 #import threading
 from multiprocessing import Process
 from cluster.ClusterHeart import zkheartbeat
-
+import threading,socket,traceback
+BUFSIZE = 1024
+encoding = 'utf-8'
+tmp_value = []
 
 #class ThreadDump(threading.Thread):
 class ThreadDump(Process):
@@ -40,3 +43,10 @@ class ThreadDump(Process):
                 pass
         elif self.type == 'heart':
             zkheartbeat(zk_hosts=self.zk_hosts,task_name=self.task_name).run()
+
+
+
+
+
+
+

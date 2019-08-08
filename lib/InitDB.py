@@ -1,6 +1,6 @@
 # -*- encoding: utf-8 -*-
 '''
-@author: Great God
+@author: xiao cai niao
 '''
 
 import pymysql,sys
@@ -14,27 +14,38 @@ class InitMyDB(object):
                  auto_commit=None,ssl=None,type=None):
         self.ssl = ssl
         self.auto_commit = auto_commit
-        self.mysql_user = mysql_user
-        self.mysql_password = mysql_password
-        self.mysql_port = mysql_port
+        self.user = mysql_user
+        self.password = mysql_password
+        self.port = mysql_port
         self.socket_dir = unix_socket
-        self.mysql_host = mysql_host
+        self.host = mysql_host
+        self.type = type
 
     def Init(self):
 
         try:
-            connection = pymysql.connect(host=self.mysql_host,
-                                              user=self.mysql_user,
-                                              password=self.mysql_password, port=self.mysql_port,
-                                              db='',
-                                              charset='utf8mb4',
-                                              autocommit=self.auto_commit,
-                                              ssl=self.ssl,
-                                              unix_socket=self.socket_dir,max_allowed_packet=536870912,
-                                              cursorclass=pymysql.cursors.DictCursor)
+            if self.type and self.type == "postgresql":
+                import psycopg2
+                connection = psycopg2.connect(host=self.host,
+                                              user=self.user,
+                                              password=self.password,
+                                              port=self.port,
+                                              sslmode='require')
+
+            else:
+                connection = pymysql.connect(host=self.host,
+                                                  user=self.user,
+                                                  password=self.password, port=self.port,
+                                                  db='',
+                                                  charset='utf8mb4',
+                                                  autocommit=self.auto_commit,
+                                                  ssl=self.ssl,
+                                                  unix_socket=self.socket_dir,max_allowed_packet=536870912,
+                                                  cursorclass=pymysql.cursors.DictCursor)
+
             return connection
         except:
-            Logging(msg='host: {}  port: {} '.format(self.mysql_host,self.mysql_port),level='error')
+            Logging(msg='host: {}  port: {} '.format(self.host,self.port),level='error')
             Logging(msg=traceback.format_exc(),level='error')
             return None
 

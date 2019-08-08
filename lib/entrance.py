@@ -1,10 +1,11 @@
 # -*- encoding: utf-8 -*-
 '''
-@author: Great God
+@author: xiao cai niao
 '''
 import sys
 sys.path.append("..")
 from binlog import Metadata
+from .Loging import Logging
 from .OperationDB import OperationDB
 
 
@@ -26,7 +27,7 @@ class Entrance(Metadata.TableMetadata):
         self.port = kargs['port']  if kargs['port'] else 3306
         self.user = kargs['user_name']
         self.passwd = kargs['user_password']
-        self.socket = kargs['socket'] if kargs['socket'] else None
+        self.socket = kargs['protocol'] if kargs['protocol'] else None
 
         self.databases = kargs['databases'].split(',')
         self.tables = kargs['tables'].split(',') if kargs['tables'] else None
@@ -60,6 +61,9 @@ class Entrance(Metadata.TableMetadata):
         self.spassword = kargs['spassword']
         self.sbinlog = kargs['sbinlog'] if 'sbinlog' in kargs else False
 
+        '''附加信息'''
+        self.ignores = eval(kargs['ignores']) if kargs['ignores'] else None
+
     def __enter__(self):
         OperationDB(databases=self.databases,tables=self.tables,binlog_file=self.binlog_file,start_position=self.start_position,
                     host=self.host,port=self.port,user=self.user,passwd=self.passwd,dhost=self.d_host,dport=self.d_port,
@@ -69,7 +73,7 @@ class Entrance(Metadata.TableMetadata):
                     key=self.key,daemon=self.daemon,shost=self.shost,sport=self.sport,suser=self.suser,
                     spassword=self.spassword,sbinlog=self.sbinlog,queue=self.queue,
                     destnation_type=self.destnation_type,map_conf=self.map_conf,queal_struct=self.queal_struct,
-                    jar=self.jar,jar_conf=self.jar_conf,lookback=self.lookback).Operation()
+                    jar=self.jar,jar_conf=self.jar_conf,lookback=self.lookback,ignores=self.ignores).Operation()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass

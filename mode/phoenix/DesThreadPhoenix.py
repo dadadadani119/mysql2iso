@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
 ''' 
 @Time    : 2018/7/25 15:47
-@Author  : Great God
+@Author  : xiao cai niao
 @File    : DesThreadPhoenix.py
 @Software: PyCharm
 '''
 
 import sys,pymysql,traceback,time
 from .InitDB import InitDB
+import phoenixdb
+import phoenixdb.cursor
 sys.path.append("..")
 from lib.ErrorCode import ErrorCode
 from lib.Loging import Logging
@@ -59,8 +61,8 @@ class desthread(GetSql):
             try:
                 self.destination_conn = InitDB(host=self.dhost, port=self.dport,user=self.duser,
                                                passwd=self.dpasswd, jar=self.jar,jar_conf=self.jar_conf).Init()
-                self.destination_cur = self.destination_conn.cursor()
-
+                #self.destination_cur = self.destination_conn.cursor()
+                self.destination_cur = self.destination_conn.cursor(cursor_factory=phoenixdb.cursor.DictCursor)
                 break
             except:
                 Logging(msg=traceback.format_exc(),level='error')
@@ -88,8 +90,8 @@ class desthread(GetSql):
         :return:
         '''
         try:
-            #args = self.escape_string(args) if args else []
-            args = self.escape_args(args)
+            args = self.escape_string(args) if args else []
+            #args = self.escape_args(args)
         except:
             Logging(msg=traceback.format_exc(),level='error')
             self.error_queue.put(1)
@@ -97,20 +99,13 @@ class desthread(GetSql):
             if sql == 'commit':
                 self.destination_conn.commit()
             else:
-                sql = sql % tuple(args)
-                self.destination_cur.execute(sql)
-        except pymysql.Error as e:
+                #sql = sql % tuple(args)
+
+                self.destination_cur.execute(sql,args)
+        except phoenixdb.errors.InternalError:
             Logging(msg=traceback.format_exc(), level='error')
-            if e.args[0] in ErrorCode:
-                if ErrorCode[e.args[0]]:
-                    if sql == 'commit':
-                        self.__retry_execute(retry=retry)
-                    else:
-                        self.__retry_execute(sql=sql,args=args,retry=retry,type=type)
-                    return True
-            Logging(msg='sql:{},values:{}'.format(sql, args), level='error')
-            Logging(msg=e, level='error')
-            return None
+            self.__retry_execute(sql=sql,args=args,retry=retry,type=type)
+            return True
 
         except:
             Logging(msg='sql:{},values:{}'.format(sql, args), level='error')
@@ -187,7 +182,7 @@ class desthread(GetSql):
             return False
         return True
 
-    def __set_mark(self,db_name,tbl_name,gtid,gno_id,at_pos):
+    def __set_mark(self,db_name,tbl_name,gtid,gno_id,at_pos,binlog):
         '''
         标签操作、也是状态记录,记得该表执行到的gtid、position位置
         :param db_name:
@@ -198,10 +193,10 @@ class desthread(GetSql):
         :return:
         '''
 
-        sql = 'UPSERT INTO repl_mark.mark_status(db_name,tbl_name,gno_uid,gno_id,at_pos) VALUES(%s,%s,%s,%s,%s)'
-        args = [db_name, tbl_name, gtid, gno_id, at_pos]
-        self.trancaction_list.append([sql,args])
-        self.__check_stat(self.__raise_sql(sql=sql,args=args))
+        # sql = 'UPSERT INTO repl_mark.mark_status(db_name,tbl_name,gno_uid,gno_id,at_pos,binlog) VALUES(?,?,?,?,?,?)'
+        # args = [db_name, tbl_name, gtid, gno_id, at_pos,binlog]
+        # self.trancaction_list.append([sql,args])
+        # self.__check_stat(self.__raise_sql(sql=sql,args=args,type=True))
 
 
     def __check_lock(self,db_tbl_name,lock_state=None):
@@ -231,7 +226,7 @@ class desthread(GetSql):
             self.__check_lock(db_tbl_name=db_tbl_name,lock_state=True)
 
     def __enter__(self):
-        fetch_value = self.__get_fetch_all()
+        # fetch_value = self.__get_fetch_all()
         __mark_status = None
         while 1:
             if not self.queue.empty():
@@ -242,41 +237,41 @@ class desthread(GetSql):
                 if trancaction_all:
                     self.__check_lock(db_tbl_name)
                     for trancaction in trancaction_all:
-                        tran_len = len(trancaction_all)
+                        # tran_len = len(trancaction_all)
                         value_list = trancaction['value_list']
                         if value_list:
                             db_name,tbl_name = value_list[1],value_list[2]
-                            gno_uid,gno_id,at_pos = trancaction['gno_uid'],trancaction['gno_id'],value_list[3]
+                            # gno_uid,gno_id,binlog,at_pos = trancaction['gno_uid'],trancaction['gno_id'],trancaction['binlog'],value_list[3]
 
-                            if db_tbl_name in fetch_value:
-                                _state = self.__fetch_check(fetch_value[db_tbl_name],gno_uid,gno_id,at_pos)
-                                if _state:
-                                    del fetch_value[db_tbl_name]
-                                else:
-                                    continue
-                            if tran_len >= 2:
-                                if __mark_status is None:
-                                    self.__set_mark(db_name=db_name, tbl_name=tbl_name, gtid=gno_uid,gno_id=gno_id, at_pos=at_pos)
-                                    __mark_status = True
-                            else:
-                                self.__set_mark(db_name=db_name, tbl_name=tbl_name, gtid=gno_uid, gno_id=gno_id,
-                                                at_pos=at_pos)
+                            # if db_tbl_name in fetch_value:
+                            #     _state = self.__fetch_check(fetch_value[db_tbl_name],gno_uid,gno_id,at_pos,binlog)
+                            #     if _state:
+                            #         del fetch_value[db_tbl_name]
+                            #     else:
+                            #         continue
+                            # if tran_len >= 2:
+                            #     if __mark_status is None:
+                            #         self.__set_mark(db_name=db_name, tbl_name=tbl_name, gtid=gno_uid,gno_id=gno_id, at_pos=at_pos,binlog=binlog)
+                            #         __mark_status = True
+                            # else:
+                            #     self.__set_mark(db_name=db_name, tbl_name=tbl_name, gtid=gno_uid, gno_id=gno_id,
+                            #                     at_pos=at_pos,binlog=binlog)
 
                             sql_list = self.GetSQL(_values=value_list[0],event_code=value_list[4],database_name=db_name,table_name=tbl_name)
                             if sql_list:
                                 for sql in sql_list:
                                     self.trancaction_list.append([sql[0], sql[1]])
-                                    self.__check_stat(self.__raise_sql(sql=sql[0], args=sql[1]))
-                    if __mark_status:
-                        self.__set_mark(db_name=db_name, tbl_name=tbl_name, gtid=gno_uid, gno_id=gno_id, at_pos=at_pos)
-                    self.__raise_sql('commit')
+                                    self.__check_stat(self.__raise_sql(sql=sql[0], args=sql[1] ,type=True))
+                    # if __mark_status:
+                    #     self.__set_mark(db_name=db_name, tbl_name=tbl_name, gtid=gno_uid, gno_id=gno_id, at_pos=at_pos,binlog=binlog)
+                    #self.__raise_sql('commit')
                     self.chunk_list_status_th[_uuid].append(self.thread_id)
                     self.trancaction_list = []
                     __mark_status = None
                     self.thread_lock_queue[db_tbl_name].pop(0)
 
 
-    def __fetch_check(self,fetch,gno_uid,gno_id,at_pos):
+    def __fetch_check(self,fetch,gno_uid,gno_id,at_pos,binlog):
         '''
         重启或接管任务时通过游标库中相应库表保存的同步状态信息，比对获取到binlog的信息
         如果游标库中的uid和获取到的binlog中不同，这种情况可能是由于mysql宕机切换导致，
@@ -287,27 +282,41 @@ class desthread(GetSql):
         :param at_pos:
         :return:
         '''
-        if str(gno_uid) == str(fetch[0]):
-            if  int(fetch[1]) > int(gno_id):
+        if gno_uid:
+            if str(gno_uid) == str(fetch[0]):
+                if  int(fetch[1]) > int(gno_id):
+                    return False
+                elif int(gno_id) == int(fetch[1]) and int(fetch[2]) >= int(at_pos):
+                    return False
+                else:
+                    return True
+            elif str(gno_uid) != str(fetch[0]):
                 return False
-            elif int(gno_id) == int(fetch[1]) and int(fetch[2]) >= int(at_pos):
-                return False
+        else:
+            if fetch[-1] == binlog:
+                if int(fetch[2] >= int(at_pos)):
+                    return False
+                else:
+                    return True
             else:
-                return True
-        elif str(gno_uid) != str(fetch[0]):
-            return False
+                binlog_num_cur = int(fetch[-1].split('.')[-1])
+                binlog_num_sync = int(binlog.split('.')[-1])
+                if binlog_num_cur < binlog_num_sync:
+                    return False
+                else:
+                    return True
 
     def __get_fetch_all(self):
         '''
         重起获取所有库、表已执行的游标
         :return:
         '''
-        sql = 'SELECT db_name,tbl_name,gno_uid,gno_id,at_pos FROM repl_mark.mark_status'
+        sql = 'SELECT db_name,tbl_name,gno_uid,gno_id,at_pos,binlog FROM repl_mark.mark_status'
         self.__check_stat(self.__raise_sql(sql=sql,type=True))
         result = self.destination_cur.fetchall()
         fetch_value = {}
         for row in result:
-            fetch_value['{}:{}'.format(row[0],row[1])] = [row[2],row[3],row[4]]
+            fetch_value['{}:{}'.format(row['DB_NAME'],row['TBL_NAME'])] = [row['GNO_UID'],row['GNO_ID'],row['AT_POS'],row['BINLOG']]
         return fetch_value
 
     def __tmp_log_all_sql(self):

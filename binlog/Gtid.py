@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 ''' 
 @Time    : 2018/6/18 14:53
-@Author  : Great God
+@Author  : xiao cai niao
 @File    : Gtid.py
 @Software: PyCharm
 '''
