@@ -84,66 +84,51 @@ class GetSql(escape):
                 if self.queal_struct:
                     _row_value = self.__equel_check_value(row_value,table_struce_key,event_code)
 
-                # if __pk_idx is not None:
-                #     cur_sql = 'UPDATE {}.{} SET {} WHERE {}'.format(database_name, table_name,
-                #                                                        self.SetJoin(table_struce_key), pk_where)
-                #     pk_values = []
-                #     for i in __pk_idx:
-                #         pk_values.append(row_value[0][i])
-                #
-                #     _args = row_value[1] + pk_values
-                # else:
-                #     cur_sql = 'UPDATE {}.{} SET {} WHERE {}'.format(database_name, table_name,
-                #                                                    self.SetJoin(table_struce_key),
-                #                                                    self.WhereJoin(table_struce_key))
-                #     _args = row_value[1] + row_value[0]
-                cur_sql = 'UPDATE {}.{} SET {} WHERE user_id=%s and with_id=%s and msg_id=%s'.format(database_name, table_name,
-                                                                    self.SetJoin(table_struce_key))
-                col_list = self.table_struct_list[table_struce_key]
-                where_value_index = [col_list.index('user_id'),col_list.index('with_id'),col_list.index('msg_id')]
-                _args = _row_value[1] + [row_value[0][i] for i in where_value_index]
+                if __pk_idx is not None:
+                    cur_sql = 'UPDATE {}.{} SET {} WHERE {}'.format(database_name, table_name,
+                                                                       self.SetJoin(table_struce_key), pk_where)
+                    pk_values = []
+                    for i in __pk_idx:
+                        pk_values.append(row_value[0][i])
 
+                    _args = row_value[1] + pk_values
+                else:
+                    cur_sql = 'UPDATE {}.{} SET {} WHERE {}'.format(database_name, table_name,
+                                                                   self.SetJoin(table_struce_key),
+                                                                   self.WhereJoin(table_struce_key))
+                    _args = row_value[1] + row_value[0]
                 _tmp_sql_list.append([cur_sql,_args])
 
         else:
             if event_code == binlog_events.WRITE_ROWS_EVENT:
+                values_str = ','.join([self.ValueJoin(table_struce_key) for i in range(len(_values))])
                 if self.queal_struct and self._tmp_col_struct:
-                    _vv =  '({},%s)'.format(','.join(['%s' for i in range(len(self._tmp_col_struct))]))
+                    col = '({})'.format(','.join(['`{}`'.format(i) for i in self._tmp_col_struct]))
                 else:
-                    _vv =  '({},%s)'.format(','.join(['%s' for i in range(len(self.table_struct_list[table_struce_key]))]))
-                values_str = ','.join([_vv for i in range(len(_values))])
-                if self.queal_struct and self._tmp_col_struct:
-                    col = '({},deleted)'.format(','.join(['{}'.format(i) for i in self._tmp_col_struct]))
-                else:
-                    col = '({},deleted)'.format(','.join(['{}'.format(i) for i in self.table_struct_list[table_struce_key]]))
-                # cur_sql = 'INSERT INTO {}.{} VALUES{};'.format(tmepdata.database_name, tmepdata.table_name,
-                #                                                    values_str)
+                    col = '({})'.format(','.join(['`{}`'.format(i) for i in self.table_struct_list[table_struce_key]]))
+
                 cur_sql = 'INSERT INTO {}.{}{} VALUES{};'.format(database_name, table_name,
                                                                    col,values_str)
                 all_values = []
                 for value in _values:
                     if self.queal_struct:
                         value = self.__equel_check_value(value,table_struce_key,event_code)
-                    all_values += value +[None]
+                    all_values += value
                 _tmp_sql_list.append([cur_sql,all_values])
             elif event_code == binlog_events.DELETE_ROWS_EVENT:
                 for value in _values:
                     if self.queal_struct:
                         _value = self.__equel_check_value(value,table_struce_key,event_code)
-                    # if __pk_idx is not None:
-                    #     cur_sql = 'DELETE FROM {}.{} WHERE {};'.format(database_name,table_name,pk_where)
-                    #     pk_values = []
-                    #     for i in __pk_idx:
-                    #         pk_values.append(value[i])
-                    #     _args = pk_values
-                    # else:
-                    #     cur_sql = 'DELETE FROM {}.{} WHERE {};'.format(database_name,table_name,self.WhereJoin(table_struce_key))
-                    #     _args = value
-                    cur_sql = 'UPDATE {}.{} SET deleted=1 WHERE user_id=%s and with_id=%s and msg_id=%s'.format(database_name,
-                                                                                                         table_name)
-                    col_list = self.table_struct_list[table_struce_key]
-                    where_value_index = [col_list.index('user_id'), col_list.index('with_id'), col_list.index('msg_id')]
-                    _args = [value[i] for i in where_value_index]
+                    if __pk_idx is not None:
+                        cur_sql = 'DELETE FROM {}.{} WHERE {};'.format(database_name,table_name,pk_where)
+                        pk_values = []
+                        for i in __pk_idx:
+                            pk_values.append(value[i])
+                        _args = pk_values
+                    else:
+                        cur_sql = 'DELETE FROM {}.{} WHERE {};'.format(database_name,table_name,self.WhereJoin(table_struce_key))
+                        _args = value
+
                     _tmp_sql_list.append([cur_sql,_args])
 
         self._tmp_col_struct = []
