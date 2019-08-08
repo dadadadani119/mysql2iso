@@ -90,7 +90,7 @@ class Dump(escape):
             if cols:
                 if iso:
                     if self.destination_type == 'phoenix':
-                        _cl = ','.join(['{}'.format(col) for col in _dcols] + ['deleted'])
+                        _cl = ','.join(['{}'.format(col) for col in _dcols])
                     else:
                         _cl = ','.join(['`{}`'.format(col) for col in _dcols])
                     insert_sql = '{} INTO {}.{}({}) VALUES'.format(sql_type, tbl[0], tbl[1], _cl)
