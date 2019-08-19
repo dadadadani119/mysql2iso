@@ -28,7 +28,7 @@
 	zk_hosts： zookeeper地址，多个使用逗号分隔，如10.1.1.1:2181,10.1.1.2:2181....，仅当使用zk_mode时才生效 
 	cluster_nodes： 基于leader_mode集群模式时配置结群中节点信息，多个依然用逗号分隔任务配置文件(功能未完成，可不管)  
 ### include(目录配置文件):
-	 global: 
+	global: 
 		 server_id: 注册为slave时使用的server_id，多个同步任务master为同一实例时不能相同，多个任务使用同步状态 库时也不能相同，用于断点续传及任务接管时获取数据的关键字段 
 		 full： 是否在线导出库、表，配置项True/False，首字母需大写，默认为False,如果开启该参数将首先导出数据这将 导致后面设置的daemon、binlog相关项失效，在确认是在线导出表时才开启该参数 	
 		 threads： 在线导出线程数，默认单线程 
